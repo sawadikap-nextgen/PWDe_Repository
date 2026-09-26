@@ -62,7 +62,7 @@ import com.pwde.app.ui.theme.PwdeTheme
 
 /**
  * Full-screen frame for the steps that work on the game's screen (choosing triggers, testing):
- * [stage] fills the screen like the game does, and GabAI's conversation sits in a collapsible
+ * [        ] fills the screen like the game does, and GabAI's conversation sits in a collapsible
  * sidebar on the right, with the same header, message and reply hint as every other step.
  */
 @Composable
