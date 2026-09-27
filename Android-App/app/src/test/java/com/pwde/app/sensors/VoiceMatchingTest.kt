@@ -3,6 +3,7 @@ package com.pwde.app.sensors
 import com.pwde.app.data.model.VoiceActivationMode
 import com.pwde.app.data.model.VoiceMatchMode
 import com.pwde.app.data.model.VoiceShortcut
+import com.pwde.app.play.GameInput
 import com.pwde.app.sensors.voice.CommandMatcher
 import com.pwde.app.sensors.voice.CommandScope
 import com.pwde.app.sensors.voice.Dictation
@@ -11,6 +12,7 @@ import com.pwde.app.sensors.voice.VoiceActivationGate
 import com.pwde.app.sensors.voice.VoiceCommand
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CommandMatcherTest {
@@ -66,6 +68,18 @@ class CommandMatcherTest {
         listOf("Gab AI", "Gabay", "open GabAI", "talk to Gabby AI").forEach { phrase ->
             assertEquals(StandardCommands.GABAI, CommandMatcher.match(phrase, StandardCommands.all, VoiceMatchMode.EXACT))
         }
+    }
+
+    /**
+     * "read screen" is app-wide on purpose: the in-game spotter's keyword list is a shared budget (see
+     * `InGameKeywordMapTest`), so an app command must never be added to `GameInput.STANDARD_BINDINGS`.
+     */
+    @Test
+    fun readScreenIsAGlobalCommandThatStaysOutOfTheInGameList() {
+        assertEquals(StandardCommands.READ_SCREEN, CommandMatcher.match("read screen", StandardCommands.all, VoiceMatchMode.EXACT))
+        assertEquals(StandardCommands.READ_SCREEN, CommandMatcher.match("read this screen please", StandardCommands.all, VoiceMatchMode.WORD_ANYWHERE))
+        assertEquals(CommandScope.GLOBAL, StandardCommands.READ_SCREEN.scope)
+        assertTrue("must not reach the spotter", GameInput.STANDARD_BINDINGS.none { "read screen" in it.phrases })
     }
 
     @Test

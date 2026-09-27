@@ -15,6 +15,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MicOff
@@ -46,6 +47,8 @@ import com.pwde.app.data.model.ControlConfig
 import com.pwde.app.data.model.VoiceActivationMode
 import com.pwde.app.data.model.VoiceMatchMode
 import com.pwde.app.data.model.VoiceShortcut
+import com.pwde.app.data.prefs.SettingsRepository
+import com.pwde.app.data.prefs.TtsSpeed
 import com.pwde.app.sensors.voice.CommandScope
 import com.pwde.app.sensors.voice.StandardCommands
 import com.pwde.app.sensors.voice.VoiceCommandManager
@@ -56,6 +59,7 @@ import com.pwde.app.ui.components.OptionCard
 import com.pwde.app.ui.components.OptionKind
 import com.pwde.app.ui.components.Pager
 import com.pwde.app.ui.components.PwdeScreen
+import com.pwde.app.ui.components.SegmentedToggle
 import com.pwde.app.ui.components.PwdeTextField
 import com.pwde.app.ui.components.SectionTitle
 import com.pwde.app.ui.components.StatusPill
@@ -71,13 +75,22 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** Read-aloud, as the Voice screen shows it. */
+data class ReadAloudState(
+    val enabled: Boolean = false,
+    val speed: TtsSpeed = TtsSpeed.NORMAL,
+    val usesOtherScreenReader: Boolean = false,
+)
+
 class VoiceConfigViewModel(
     private val controlsRepository: ControlsRepository,
     private val voiceCommandManager: VoiceCommandManager,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
     val config: StateFlow<ControlConfig?> = controlsRepository.config
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -105,6 +118,26 @@ class VoiceConfigViewModel(
     fun setVoiceEnabled(enabled: Boolean) {
         launch { controlsRepository.setVoiceEnabled(enabled, persistToActiveProfile = true) }
         voiceCommandManager.refreshPermissions()
+    }
+
+    /**
+     * Read-aloud lives in settings rather than the controls, but this screen is where a user changes how
+     * PWDe talks — and the first-run Voice tutorial, the only other place with the switch, is never shown
+     * again.
+     */
+    val readAloud: StateFlow<ReadAloudState> = settingsRepository.settings
+        .map { ReadAloudState(it.ttsEnabled, it.ttsSpeed, it.usesOtherScreenReader) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ReadAloudState())
+
+    /** Two screen readers would talk over each other, so turning one on turns the other off. */
+    fun setReadAloud(enabled: Boolean) = launch {
+        val current = settingsRepository.settings.first()
+        settingsRepository.setScreenReading(enabled, current.ttsSpeed, if (enabled) false else current.usesOtherScreenReader)
+    }
+
+    fun setReadAloudSpeed(speed: TtsSpeed) = launch {
+        val current = settingsRepository.settings.first()
+        settingsRepository.setScreenReading(current.ttsEnabled, speed, current.usesOtherScreenReader)
     }
 
     fun setMatchMode(mode: VoiceMatchMode) = launch { controlsRepository.setVoiceMatchMode(mode, persistToActiveProfile = true) }
@@ -144,6 +177,7 @@ fun VoiceConfigScreen(viewModel: VoiceConfigViewModel, onBack: () -> Unit) {
     val voice by viewModel.voice.collectAsStateWithLifecycle()
     val levels by viewModel.levels.collectAsStateWithLifecycle()
     val phrases by viewModel.phrases.collectAsStateWithLifecycle()
+    val readAloud by viewModel.readAloud.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableIntStateOf(1) }
     val requestMic = rememberMicPermissionRequest { granted ->
         viewModel.onMicPermissionResult()
@@ -192,6 +226,26 @@ fun VoiceConfigScreen(viewModel: VoiceConfigViewModel, onBack: () -> Unit) {
                         icon = Icons.Outlined.Timer, kind = OptionKind.RADIO,
                     )
                 }
+            }
+            SectionTitle("Read aloud")
+            SwitchRow(
+                title = "Read the screen to me",
+                description = "Speaks what is on the screen — labels, values and buttons — with your phone's text-to-speech voice",
+                checked = readAloud.enabled,
+                onCheckedChange = viewModel::setReadAloud,
+                icon = Icons.AutoMirrored.Outlined.VolumeUp,
+            )
+            if (readAloud.usesOtherScreenReader) {
+                StatusPill("Off — you told PWDe you use another screen reader", color = PwdeTheme.colors.warning)
+            }
+            if (readAloud.enabled) {
+                SegmentedToggle(
+                    options = TtsSpeed.entries,
+                    selected = readAloud.speed,
+                    label = { it.label },
+                    onSelect = viewModel::setReadAloudSpeed,
+                )
+                InfoNote("Say \"read screen\" to hear the current screen again. Leave this off if TalkBack is reading for you.")
             }
         } else if (page == 2) {
             SectionTitle("Your spoken shortcuts")

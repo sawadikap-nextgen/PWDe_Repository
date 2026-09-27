@@ -34,6 +34,13 @@ object StandardCommands {
     val SETTINGS = VoiceCommand("settings", "settings", "open settings", scope = CommandScope.GLOBAL)
     val MENU = VoiceCommand("menu", "menu", "main menu", scope = CommandScope.GLOBAL)
     val CLOSE = VoiceCommand("close", "close", scope = CommandScope.GLOBAL)
+
+    /**
+     * Reads the current screen out loud (see `ScreenReaderViewModel`). App-wide on purpose: the
+     * in-game spotter's keyword list is a shared budget, and this is not an in-game command.
+     */
+    val READ_SCREEN = VoiceCommand("read_screen", "read screen", "read this screen", "read the screen", scope = CommandScope.GLOBAL)
+
     val GAMES = VoiceCommand("open_games", "open games", "games", "game library", scope = CommandScope.GLOBAL)
     val GABAI = VoiceCommand(
         "open_gabai", "gabai", "gab ai", "gabay", "gabby", "gabby ai", "open gabai", "open gab ai",
@@ -42,7 +49,7 @@ object StandardCommands {
     )
     val PROFILE = VoiceCommand("open_profile", "open profile", "profile", "my profile", scope = CommandScope.GLOBAL)
 
-    val all = listOf(BACK, HOME, NEXT, SKIP, SETTINGS, MENU, CLOSE, GAMES, GABAI, PROFILE)
+    val all = listOf(BACK, HOME, NEXT, SKIP, SETTINGS, MENU, CLOSE, READ_SCREEN, GAMES, GABAI, PROFILE)
 
     /** "play <game>" from anywhere in PWDe launches that game with its last-played profile. */
     val playGames = Game.entries.map { VoiceCommand("play:${it.id}", listOf("play ${it.displayName}"), CommandScope.GLOBAL) }

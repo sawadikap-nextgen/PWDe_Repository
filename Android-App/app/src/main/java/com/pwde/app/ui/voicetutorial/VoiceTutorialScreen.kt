@@ -162,7 +162,7 @@ private fun ReadAloudStep(state: VoiceTutorialUiState, viewModel: VoiceTutorialV
     val colors = PwdeTheme.colors
     SwitchRow(
         title = "Read on-screen text aloud",
-        description = "Uses your phone's text-to-speech voice",
+        description = "Speaks a screen's contents — its labels, values and buttons — in your phone's voice",
         checked = state.ttsEnabled,
         onCheckedChange = viewModel::setTtsEnabled,
         icon = Icons.AutoMirrored.Outlined.VolumeUp,
