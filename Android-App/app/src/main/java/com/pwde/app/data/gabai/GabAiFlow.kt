@@ -11,6 +11,10 @@ object GabAiFlow {
     fun newGameProfile(form: GabAiForm): GabAiState =
         if (form.gameId != null) GabAiState.ConfirmCalibrationProfile else GabAiState.ChooseGame
 
+    /** Manual mapping skips calibration entirely: pick a game if needed, then the screenshot. */
+    fun newManualMapping(form: GabAiForm): GabAiState =
+        if (form.gameId != null) GabAiState.UploadScreenshot else GabAiState.ChooseGame
+
     fun axisDone(axis: Axis): GabAiState =
         axis.next()?.let { GabAiState.CalibrateCursorAxis(it) }
             ?: GabAiState.CalibrateJoystick(JoystickParameter.SENSITIVITY)
@@ -43,7 +47,8 @@ object GabAiFlow {
     fun continueToGame(form: GabAiForm): GabAiState =
         if (form.gameId != null) GabAiState.ConfirmCalibrationProfile else GabAiState.ChooseGame
 
-    fun gameChosen(): GabAiState = GabAiState.ConfirmCalibrationProfile
+    fun gameChosen(form: GabAiForm = GabAiForm()): GabAiState =
+        if (form.manual) GabAiState.UploadScreenshot else GabAiState.ConfirmCalibrationProfile
 
     fun calibrationConfirmed(): GabAiState = GabAiState.UploadScreenshot
 
@@ -79,7 +84,7 @@ object GabAiFlow {
         GabAiState.CalibrationSaved -> GabAiState.Welcome
         GabAiState.ChooseGame -> GabAiState.Welcome
         GabAiState.ConfirmCalibrationProfile -> GabAiState.ChooseGame
-        GabAiState.UploadScreenshot -> GabAiState.ConfirmCalibrationProfile
+        GabAiState.UploadScreenshot -> if (form.manual) GabAiState.ChooseGame else GabAiState.ConfirmCalibrationProfile
         is GabAiState.ButtonMapping -> GabAiState.UploadScreenshot
         GabAiState.AssignTriggers -> GabAiState.ButtonMapping(form.buttons.size)
         GabAiState.TestControls -> GabAiState.AssignTriggers

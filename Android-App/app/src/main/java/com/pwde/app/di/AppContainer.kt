@@ -1,5 +1,7 @@
 package com.pwde.app.di
 
+import com.pwde.app.data.games.CustomGamesRepository
+import com.pwde.app.data.games.DataStoreCustomGamesRepository
 import android.content.Context
 import android.view.accessibility.AccessibilityManager
 import androidx.datastore.preferences.preferencesDataStore
@@ -35,12 +37,14 @@ import com.pwde.app.sensors.voice.WakeWordEngine
 import com.pwde.app.sensors.voice.WakeWordTuningStore
 
 private val Context.settingsDataStore by preferencesDataStore(name = "user_settings")
+private val Context.customGamesDataStore by preferencesDataStore(name = "custom_games")
 
 /** Manual DI: app-wide singletons, created lazily. Lives on [com.pwde.app.PwdeApplication]. */
 class AppContainer(private val context: Context) {
     private val database by lazy { PwdeDatabase.create(context) }
 
     val settingsRepository: SettingsRepository by lazy { DataStoreSettingsRepository(context.settingsDataStore) }
+    val customGamesRepository: CustomGamesRepository by lazy { DataStoreCustomGamesRepository(context.customGamesDataStore) }
     val profileRepository by lazy {
         ProfileRepository(database.calibrationProfileDao(), database.gameProfileDao())
     }

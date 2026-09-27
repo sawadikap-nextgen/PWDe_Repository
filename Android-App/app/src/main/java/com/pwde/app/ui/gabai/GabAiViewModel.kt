@@ -5,6 +5,9 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.viewModelScope
 import com.pwde.app.data.gabai.Axis
+import com.pwde.app.data.games.CustomGameId
+import com.pwde.app.data.games.CustomGamesRepository
+import com.pwde.app.data.games.gameDisplayName
 import com.pwde.app.data.gabai.GabAiFlow
 import com.pwde.app.data.gabai.GabAiForm
 import com.pwde.app.data.gabai.GabAiRepository
@@ -65,6 +68,8 @@ sealed interface GabAiStart {
     data object Welcome : GabAiStart
     data class NewGameProfile(val gameId: String?) : GabAiStart
     data class EditGameProfile(val profileId: Long) : GabAiStart
+    /** Place buttons by hand: no calibration, voice or gesture steps, and no button detection. */
+    data class ManualMapping(val gameId: String?) : GabAiStart
 }
 
 sealed interface GabAiNavigation {
@@ -96,6 +101,8 @@ data class GabAiUiState(
 ) {
     val state: GabAiState get() = session?.state ?: GabAiState.Welcome
     val form: GabAiForm get() = session?.form ?: GabAiForm()
+    /** Every step's header: "Manual Mapping" for the whole manual flow, "GabAI" otherwise. */
+    val panelTitle: String get() = stagePanelTitle(form.manual)
 }
 
 /** One input on the test step. [buttonId] is null when it pressed nothing; [seq] makes a repeat flash again. */
@@ -127,6 +134,8 @@ class GabAiViewModel(
     private val inGameVoice: InGameVoiceEngine? = null,
     /** The test waits for a live session over the real game to end: it takes the mic for itself. */
     private val livePlay: LivePlay? = null,
+    /** Games added by name on the choose-game step (shown as cards, not playable yet). */
+    private val customGamesRepository: CustomGamesRepository = CustomGamesRepository.InMemory(),
 ) : FaceTrackingViewModel(faceTracking) {
     /** The speech model behind GabAI's own voice commands and "assign/use" dictation. */
     val navigationSpeechModel: String get() = voiceCommandManager.modelLabel
@@ -138,6 +147,13 @@ class GabAiViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val gameProfiles: StateFlow<List<GameProfile>> = profileRepository.gameProfiles
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val customGames: StateFlow<List<String>> = customGamesRepository.names
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun addCustomGame(name: String) {
+        viewModelScope.launch { customGamesRepository.add(name) }
+    }
 
     /** Gesture sensitivities from the working controls, so the gesture test can tune them live. */
     val gestureSensitivity: StateFlow<Map<FacialGesture, Int>> = controlsRepository.config
@@ -151,7 +167,7 @@ class GabAiViewModel(
     val navigation: Flow<GabAiNavigation> = _navigation.receiveAsFlow()
 
     /** Screenshots are sent to the detection backend to pre-place buttons. */
-    val autoDetectsButtons: Boolean get() = hudDetector.isAvailable
+    val autoDetectsButtons: Boolean get() = hudDetector.isAvailable && !_ui.value.form.manual
 
     /**
      * The step GabAI was opened on when another screen started it mid-flow (new or edited game
@@ -183,6 +199,7 @@ class GabAiViewModel(
                 GabAiStart.Welcome -> Unit
                 is GabAiStart.NewGameProfile -> startGameProfile(start.gameId)
                 is GabAiStart.EditGameProfile -> editGameProfile(start.profileId)
+                is GabAiStart.ManualMapping -> startManualMapping(start.gameId)
             }
         }
         viewModelScope.launch {
@@ -239,6 +256,11 @@ class GabAiViewModel(
     fun startGameProfile(gameId: String? = null) = viewModelScope.launch {
         val form = GabAiForm(gameId = gameId, calibrationProfileId = profileRepository.calibrationProfiles.first().firstOrNull()?.id)
         begin(GabAiFlow.newGameProfile(form), form)
+    }
+
+    fun startManualMapping(gameId: String? = null) = viewModelScope.launch {
+        val form = GabAiForm(gameId = gameId, calibrationProfileId = profileRepository.calibrationProfiles.first().firstOrNull()?.id, manual = true)
+        begin(GabAiFlow.newManualMapping(form), form)
     }
 
     fun resume() {
@@ -409,7 +431,13 @@ class GabAiViewModel(
 
     fun chooseGame(game: Game) {
         updateForm { it.copy(gameId = game.id) }
-        go(GabAiFlow.gameChosen())
+        go(GabAiFlow.gameChosen(_ui.value.form))
+    }
+
+    /** An added (unsupported) game can still be mapped and saved; it just can't be launched. */
+    fun chooseCustomGame(name: String) {
+        updateForm { it.copy(gameId = CustomGameId.of(name)) }
+        go(GabAiFlow.gameChosen(_ui.value.form))
     }
 
     fun chooseCalibration(id: Long) = updateForm { it.copy(calibrationProfileId = id) }
@@ -455,14 +483,16 @@ class GabAiViewModel(
         } else {
             updateForm { it.copy(screenshotPath = path) }
             loadScreenshot(path)
-            detectButtons(path)
+            // Manual mapping keeps the screenshot as a backdrop only; it never goes to detection.
+            if (!_ui.value.form.manual) detectButtons(path)
         }
     }
 
     /** Pre-places the buttons the backend model finds. Never overwrites buttons the user already placed. */
     private suspend fun detectButtons(path: String) {
-        val gameId = _ui.value.form.gameId ?: return
-        if (!hudDetector.isAvailable || _ui.value.form.buttons.isNotEmpty()) return
+        // The detection model only knows supported games; an added game's buttons are placed by hand.
+        val gameId = _ui.value.form.gameId?.takeIf { Game.byId(it) != null } ?: return
+        if (!hudDetector.isAvailable || _ui.value.form.manual || _ui.value.form.buttons.isNotEmpty()) return
         _ui.update { it.copy(detectingButtons = true) }
         val found = runCatching { hudDetector.detect(path, gameId) }
         _ui.update { it.copy(detectingButtons = false) }
@@ -739,13 +769,14 @@ class GabAiViewModel(
 
     fun saveGameProfile() = viewModelScope.launch {
         val form = _ui.value.form
-        val game = Game.byId(form.gameId) ?: return@launch
+        val gameId = form.gameId ?: return@launch
+        val gameName = gameDisplayName(gameId) ?: return@launch
         val existing = form.editingGameProfileId?.let { profileRepository.getGameProfile(it) }
-        val name = form.profileName.trim().ifEmpty { defaultProfileName(game) }
+        val name = form.profileName.trim().ifEmpty { defaultProfileName(gameId, gameName) }
         val profile = GameProfile(
             id = form.editingGameProfileId ?: 0,
-            gameId = game.id,
-            gameName = game.displayName,
+            gameId = gameId,
+            gameName = gameName,
             profileName = name,
             // A calibration deleted meanwhile would break the foreign key; save without the link instead.
             calibrationProfileId = form.calibrationProfileId?.takeIf { profileRepository.getCalibrationProfile(it) != null },
@@ -768,13 +799,17 @@ class GabAiViewModel(
         val form = _ui.value.form
         val gameId = form.gameId ?: return
         val profileId = form.savedGameProfileId ?: return
+        if (Game.byId(gameId) == null) {
+            message("${gameDisplayName(gameId)} isn't supported yet, so it can't be played. Your mapping is saved.")
+            return
+        }
         finish(GabAiNavigation.Play(gameId, profileId))
     }
 
     /** Another game profile, keeping the same calibration profile. */
     fun createAnother() = viewModelScope.launch {
         val calibration = _ui.value.form.calibrationProfileId
-        val form = GabAiForm(calibrationProfileId = calibration)
+        val form = GabAiForm(calibrationProfileId = calibration, manual = _ui.value.form.manual)
         begin(GabAiFlow.createAnother(), form)
     }
 
@@ -845,7 +880,7 @@ class GabAiViewModel(
     private fun defaultCalibrationName(form: GabAiForm): String =
         "My ${form.calibrationMode.label.lowercase()} setup ${calibrationProfiles.value.size + 1}"
 
-    private fun defaultProfileName(game: Game): String = "${game.displayName} profile ${gameProfiles.value.count { it.gameId == game.id } + 1}"
+    private fun defaultProfileName(gameId: String, gameName: String): String = "$gameName profile ${gameProfiles.value.count { it.gameId == gameId } + 1}"
     private var previousButtonsForUndo: List<MappedButton>? = null
 
     // 1. Function to go to the previous button
