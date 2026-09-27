@@ -245,7 +245,7 @@ internal fun JoystickSource.icon() =
 private const val ACTIONS_PER_PAGE = 4
 
 internal val GESTURES_COMMANDS = GestureAction.entries.map { voiceCommand(it.name, "change ${it.label}", it.label) } + listOf(
-    voiceCommand("next_page", "next page"),
+    voiceCommand("next_page", "next", "next page"),
     voiceCommand("previous_page", "previous page", "previous"),
 )
 
@@ -562,7 +562,7 @@ internal val JOYSTICK_COMMANDS = listOf(
     voiceCommand("smaller", "smaller", "decrease size"),
     voiceCommand("more_sensitive", "more sensitive", "increase sensitivity"),
     voiceCommand("less_sensitive", "less sensitive", "decrease sensitivity"),
-    voiceCommand("set_center", "set center", "center here", "set centre"),
+    voiceCommand("set_center", "set center here", "set center", "center here", "set centre"),
     voiceCommand("advanced", "advanced"),
     voiceCommand("basic", "basic"),
 )

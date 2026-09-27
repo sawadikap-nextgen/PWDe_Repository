@@ -218,8 +218,8 @@ internal fun GabAiSays(text: String, compact: Boolean = false) {
 // ---------------- Welcome ----------------
 
 private val WELCOME_COMMANDS = listOf(
-    voiceCommand("calibration", "new calibration", "calibration"),
-    voiceCommand("game", "new game", "game profile"),
+    voiceCommand("calibration", "new calibration profile", "new calibration", "calibration"),
+    voiceCommand("game", "new game profile", "new game", "game profile"),
     voiceCommand("continue", "continue", "continue existing"),
 ) + MainTab.entries.filter { it != MainTab.GABAI }.map { voiceCommand("tab:${it.name}", it.label) }
 
@@ -598,8 +598,8 @@ private fun FacialGesture.unit() = when (this) {
 }
 
 private val GESTURE_REVIEW_COMMANDS = listOf(
-    voiceCommand("save", "save", "save profile"),
-    voiceCommand("retry", "try again", "retry"),
+    voiceCommand("save", "save calibration profile", "save", "save profile"),
+    voiceCommand("retry", "try the missed ones again", "try again", "retry"),
 )
 
 @Composable
@@ -619,7 +619,7 @@ private fun GestureReviewStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
             missed.isEmpty() -> "You did every gesture, so they're all on! "
             else -> "You did ${on.size} of ${tests.size} gestures. Only those are on, so the others can't fire by accident. "
         } + "Give this profile a name and save it.",
-        voiceHint = "Say \"name it\" + a name, " + if (missed.isEmpty()) "then \"save\"" else "\"try again\" or \"save\"",
+        voiceHint = "Say \"save as\" + a name" + if (missed.isEmpty()) "" else ", or \"try again\"",
         footer = { PwdeButton("Save calibration profile", viewModel::saveCalibration, icon = Icons.Outlined.Save, modifier = Modifier.fillMaxWidth()) },
     ) {
         SectionTitle("On (${on.size})")
@@ -635,7 +635,7 @@ private fun GestureReviewStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
 
 private val SAVED_COMMANDS = listOf(
     voiceCommand("done", "done", "finish"),
-    voiceCommand("game", "set up a game", "game profile", "continue"),
+    voiceCommand("game", "next", "set up a game with it", "set up a game", "game profile", "continue"),
 )
 
 @Composable
@@ -648,10 +648,10 @@ private fun CalibrationSavedStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         title = "Calibration saved",
         says = "Saved \"${ui.form.calibrationName}\"! It's your active setup now. " +
                 if (nextGame) "Let's carry on with your game." else "Want to set up a game with it?",
-        voiceHint = "Say \"set up a game\" or \"done\"",
+        voiceHint = if (nextGame) "Say \"next\" or \"done\"" else "Say \"set up a game\" or \"done\"",
     ) {
         PwdeButton(
-            if (nextGame) "Continue to the game profile" else "Set up a game with it",
+            if (nextGame) "Next" else "Set up a game with it",
             viewModel::continueToGame,
             icon = Icons.Outlined.SportsEsports,
             modifier = Modifier.fillMaxWidth(),

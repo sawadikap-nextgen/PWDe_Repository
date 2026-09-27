@@ -184,7 +184,7 @@ fun SetupScreen(viewModel: SetupViewModel, onExit: () -> Unit, onFinished: () ->
                     primaryText = when {
                         onCursorStep && !onLastAxis -> "Next"
                         state.isLastStep -> "Finish"
-                        else -> "Continue"
+                        else -> "Next"
                     },
                     onPrimary = if (onCursorStep) viewModel::axisDone else viewModel::continueStep,
                     primaryIcon = if (state.isLastStep && (!onCursorStep || onLastAxis)) Icons.Outlined.Check else null,

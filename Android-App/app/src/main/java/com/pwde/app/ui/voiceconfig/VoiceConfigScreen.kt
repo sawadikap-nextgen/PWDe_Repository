@@ -163,7 +163,7 @@ private val VOICE_CONFIG_COMMANDS = listOf(
     voiceCommand("anywhere", "word anywhere", "anywhere"),
     voiceCommand("immediate", "right away"),
     voiceCommand("after", "after I finish", "after finish"),
-    voiceCommand("next_page", "next page", "commands"),
+    voiceCommand("next_page", "next", "next page", "commands"),
     voiceCommand("previous_page", "previous page", "previous"),
     voiceCommand("all_commands", "all commands", "all voice commands"),
 )

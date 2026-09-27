@@ -430,7 +430,7 @@ private enum class GameFilter(val label: String, val matches: (Game, Set<String>
 
 internal val GAME_DETAIL_COMMANDS = listOf(
     voiceCommand("play", "play", "launch game", "launch", "start"),
-    voiceCommand("gabai", "set up with gabai", "new profile", "gabai", "gab ai"),
+    voiceCommand("gabai", "set up with gabai", "new profile with gabai", "new profile", "gabai", "gab ai"),
 )
 
 /** D2 Games: narrow the game list by genre or setup status; tiles show their setup status. */
