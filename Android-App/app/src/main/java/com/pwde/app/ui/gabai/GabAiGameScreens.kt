@@ -46,8 +46,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import com.pwde.app.ui.profile.RECENT_CALIBRATIONS
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.pwde.app.data.local.CalibrationProfile
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -130,6 +134,8 @@ private val CONFIRM_COMMANDS = listOf(
 internal fun ConfirmCalibrationStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     val profiles by viewModel.calibrationProfiles.collectAsStateWithLifecycle()
     val selected = ui.form.calibrationProfileId
+    // Start open when the picked profile is an older one, so it stays visible.
+    var showAll by rememberSaveable { mutableStateOf(profiles.sortedWith(compareByDescending<CalibrationProfile> { it.createdAt }.thenByDescending { it.id }).drop(RECENT_CALIBRATIONS).any { it.id == selected }) }
     VoiceCommandsEffect(CONFIRM_COMMANDS) { id -> if (id == "use") viewModel.confirmCalibration() else viewModel.calibrateForThisGame() }
     GabAiStep(
         viewModel, ui,
@@ -143,7 +149,9 @@ internal fun ConfirmCalibrationStep(viewModel: GabAiViewModel, ui: GabAiUiState)
         },
     ) {
         Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
-            profiles.forEach { profile ->
+            val newestFirst = remember(profiles) { profiles.sortedWith(compareByDescending<CalibrationProfile> { it.createdAt }.thenByDescending { it.id }) }
+            val shown = if (showAll) newestFirst else newestFirst.take(RECENT_CALIBRATIONS)
+            shown.forEach { profile ->
                 OptionCard(
                     profile.name,
                     profile.inputModeOrDefault.let { if (it == InputMode.JOYSTICK) "Joystick" else "Cursor" },
@@ -153,6 +161,15 @@ internal fun ConfirmCalibrationStep(viewModel: GabAiViewModel, ui: GabAiUiState)
                     kind = OptionKind.RADIO,
                 )
             }
+        }
+        if (profiles.size > RECENT_CALIBRATIONS) {
+            PwdeButton(
+                if (showAll) "Show less" else "Show ${profiles.size - RECENT_CALIBRATIONS} more",
+                { showAll = !showAll },
+                style = ButtonStyle.SECONDARY,
+                icon = if (showAll) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         PwdeButton(
             "Make a new calibration",

@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Login
@@ -369,15 +367,11 @@ private fun CalibrationProfileCarousel(
     onActivate: (CalibrationProfile) -> Unit,
     onEdit: (Long) -> Unit,
 ) {
-    val pagerState = rememberPagerState(pageCount = { profiles.size })
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val newestFirst = remember(profiles) { profiles.sortedWith(compareByDescending<CalibrationProfile> { it.createdAt }.thenByDescending { it.id }) }
+    val shown = if (expanded) newestFirst else newestFirst.take(RECENT_CALIBRATIONS)
     Column(verticalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
-        HorizontalPager(
-            state = pagerState,
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            pageSpacing = PwdeTheme.spacing.itemGap,
-            modifier = Modifier.fillMaxWidth(),
-        ) { page ->
-            val profile = profiles[page]
+        shown.forEach { profile ->
             val active = profile.id == activeProfileId
             GradientCard(
                 Modifier.fillMaxWidth(),
@@ -410,16 +404,20 @@ private fun CalibrationProfileCarousel(
                 }
             }
         }
-        if (profiles.size > 1) {
-            Text(
-                "Swipe to browse · ${pagerState.currentPage + 1} of ${profiles.size}",
-                style = MaterialTheme.typography.labelMedium,
-                color = PwdeTheme.colors.textMuted,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
+        if (profiles.size > RECENT_CALIBRATIONS) {
+            PwdeButton(
+                if (expanded) "Show less" else "Show ${profiles.size - RECENT_CALIBRATIONS} more",
+                { expanded = !expanded },
+                style = ButtonStyle.SECONDARY,
+                icon = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
 }
+
+/** How many of the newest calibration profiles show before "Show more". */
+internal const val RECENT_CALIBRATIONS = 2
 
 /** One game's profiles, like a folder. */
 private data class GameFolder(val gameId: String, val name: String, val profiles: List<GameProfile>)

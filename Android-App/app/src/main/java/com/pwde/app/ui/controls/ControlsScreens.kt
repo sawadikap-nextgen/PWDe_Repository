@@ -413,7 +413,8 @@ private fun TryGesture(viewModel: ChooseGestureViewModel, gesture: FacialGesture
         Text(
             when {
                 detected -> "Detected!"
-                face.isGyro -> "Face gestures need the camera, and a gyro joystick deliberately keeps it off."
+                face.isGyro && face.gesture.measures[gesture] == null ->
+                    "With a gyro joystick, the phone's tilt steers: head tilt, nod and shake are off, and face expressions need your face in view."
                 face.isSimulated && face.gesture.measures[gesture] == null -> "Demo mode can only simulate tilt, nod and shake."
                 !face.hasFace -> "Face the camera to try it."
                 else -> "Do the move — the bar passes the white tick when PWDe sees it."

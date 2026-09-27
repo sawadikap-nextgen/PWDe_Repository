@@ -57,6 +57,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -186,28 +187,39 @@ class MediaPipeFaceTrackingManager(
 
     /** One tracking session: the camera when possible, otherwise the labelled motion-sensor demo. */
     private fun session(): Flow<FaceState> = channelFlow {
-        if (!hasCameraPermission) {
-            forward(simulatedSession("Camera permission is off"))
-            return@channelFlow
+        when (val camera = prepareCamera()) {
+            is CameraSetup.Failed -> forward(simulatedSession(camera.reason))
+            is CameraSetup.Ready -> forward(cameraSession(camera))
         }
-        val provider = runCatching { ProcessCameraProvider.awaitInstance(appContext) }.getOrNull()
-        val hasFront = provider != null &&
-            runCatching { provider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) }.getOrDefault(false)
-        if (provider == null || !hasFront) {
-            forward(simulatedSession("No front camera found"))
-            return@channelFlow
-        }
-        val results = Channel<Pair<FaceLandmarkerResult, Long>>(Channel.CONFLATED)
-        val landmarker = createLandmarker(results)
-        if (landmarker == null) {
-            forward(simulatedSession("The face model couldn't load"))
-            return@channelFlow
-        }
-        forward(cameraSession(provider, landmarker, results))
     }
 
     private suspend fun ProducerScope<FaceState>.forward(flow: Flow<FaceState>) {
         flow.collect { send(it) }
+    }
+
+    /** What the face pipeline needs before it can open the camera, or why it can't. */
+    private sealed interface CameraSetup {
+        class Ready(
+            val provider: ProcessCameraProvider,
+            val landmarker: FaceLandmarker,
+            val results: Channel<Pair<FaceLandmarkerResult, Long>>,
+        ) : CameraSetup
+
+        class Failed(val reason: String) : CameraSetup
+    }
+
+    /** The front camera was found but couldn't be bound. */
+    private class CameraBindException(cause: Throwable) : Exception("Couldn't open the front camera", cause)
+
+    private suspend fun prepareCamera(): CameraSetup {
+        if (!hasCameraPermission) return CameraSetup.Failed("Camera permission is off")
+        val provider = runCatching { ProcessCameraProvider.awaitInstance(appContext) }.getOrNull()
+        val hasFront = provider != null &&
+            runCatching { provider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) }.getOrDefault(false)
+        if (provider == null || !hasFront) return CameraSetup.Failed("No front camera found")
+        val results = Channel<Pair<FaceLandmarkerResult, Long>>(Channel.CONFLATED)
+        val landmarker = createLandmarker(results) ?: return CameraSetup.Failed("The face model couldn't load")
+        return CameraSetup.Ready(provider, landmarker, results)
     }
 
     private fun createLandmarker(results: Channel<Pair<FaceLandmarkerResult, Long>>): FaceLandmarker? = try {
@@ -229,16 +241,43 @@ class MediaPipeFaceTrackingManager(
         null
     }
 
-    private fun cameraSession(
-        provider: ProcessCameraProvider,
-        landmarker: FaceLandmarker,
-        results: Channel<Pair<FaceLandmarkerResult, Long>>,
-    ): Flow<FaceState> = channelFlow {
+    private fun cameraSession(camera: CameraSetup.Ready): Flow<FaceState> = channelFlow {
         val processor = FaceFrameProcessor().also { activeProcessor = it }
         val tuningState = tuning.stateIn(this)
         val base = FaceState(source = TrackingSource.CAMERA, status = TrackingStatus.Starting)
         send(base)
+        try {
+            faceLandmarks(camera, withPreview = true).collect { (result, timestamp) ->
+                val frameTuning = tuningState.value
+                val next = processor.process(
+                    pose = result.headPose(),
+                    blendshapes = result.blendshapeScores(),
+                    timestampMs = timestamp,
+                    tuning = frameTuning,
+                    base = base.copy(landmarks = result.landmarkArray(), confidence = result.presence()),
+                )
+                processor.actionableStarts(next, frameTuning.controls).forEach { _gestureEvents.tryEmit(it) }
+                send(next)
+            }
+        } catch (e: CameraBindException) {
+            forward(simulatedSession("The front camera couldn't open"))
+        } finally {
+            if (activeProcessor === processor) activeProcessor = null
+        }
+    }
 
+    /**
+     * The front camera's face-landmarker results, from binding the camera until collection stops;
+     * then the camera and the landmarker are released. Throws [CameraBindException] when the camera
+     * can't be bound. [withPreview] lets a screen show the feed; the gyro joystick doesn't need one.
+     */
+    private fun faceLandmarks(
+        camera: CameraSetup.Ready,
+        withPreview: Boolean,
+    ): Flow<Pair<FaceLandmarkerResult, Long>> = channelFlow {
+        val provider = camera.provider
+        val landmarker = camera.landmarker
+        val results = camera.results
         val executor = Executors.newSingleThreadExecutor()
         val owner = SessionLifecycleOwner()
         val resolution = ResolutionSelector.Builder()
@@ -269,8 +308,22 @@ class MediaPipeFaceTrackingManager(
             override fun onDisplayRemoved(displayId: Int) = Unit
         }
 
+        fun release() {
+            results.close()
+            mainHandler.post {
+                displayManager.unregisterDisplayListener(rotationListener)
+                analysis.clearAnalyzer()
+                owner.destroy()
+                runCatching { provider.unbind(preview, analysis) }
+                _surfaceRequest.value = null
+                // Close the landmarker on the analysis thread, after any frame still in flight.
+                executor.execute { landmarker.close() }
+                executor.shutdown()
+            }
+        }
+
         // CameraX use-case wiring and binding must happen on the main thread.
-        val bound = withContext(Dispatchers.Main) {
+        val bindError = withContext(Dispatchers.Main) {
             runCatching {
                 syncRotation()
                 displayManager.registerDisplayListener(rotationListener, mainHandler)
@@ -290,10 +343,14 @@ class MediaPipeFaceTrackingManager(
                 // CameraX delivers no frames at all while a bound preview has no surface, which is the
                 // case whenever PWDe runs in the background over a game.
                 provider.bindToLifecycle(owner, CameraSelector.DEFAULT_FRONT_CAMERA, analysis)
-            }.onFailure { Log.e(TAG, "Couldn't open the front camera", it) }.isSuccess
+            }.onFailure { Log.e(TAG, "Couldn't open the front camera", it) }.exceptionOrNull()
+        }
+        if (bindError != null) {
+            release()
+            throw CameraBindException(bindError)
         }
 
-        if (bound) {
+        if (withPreview) {
             launch(Dispatchers.Main) {
                 _surfaceRequest.subscriptionCount
                     .map { it > 0 }
@@ -308,43 +365,21 @@ class MediaPipeFaceTrackingManager(
                         }.onFailure { Log.w(TAG, "Couldn't ${if (shown) "show" else "hide"} the camera preview", it) }
                     }
             }
-            launch(Dispatchers.Default) {
-                for ((result, timestamp) in results) {
-                    val frameTuning = tuningState.value
-                    val next = processor.process(
-                        pose = result.headPose(),
-                        blendshapes = result.blendshapeScores(),
-                        timestampMs = timestamp,
-                        tuning = frameTuning,
-                        base = base.copy(landmarks = result.landmarkArray(), confidence = result.presence()),
-                    )
-                    processor.actionableStarts(next, frameTuning.controls).forEach { _gestureEvents.tryEmit(it) }
-                    send(next)
-                }
-            }
-        } else {
-            launch { simulatedSession("The front camera couldn't open").collect { send(it) } }
+        }
+        launch(Dispatchers.Default) {
+            for (frame in results) send(frame)
         }
 
-        awaitClose {
-            results.close()
-            if (activeProcessor === processor) activeProcessor = null
-            mainHandler.post {
-                displayManager.unregisterDisplayListener(rotationListener)
-                analysis.clearAnalyzer()
-                owner.destroy()
-                runCatching { provider.unbind(preview, analysis) }
-                _surfaceRequest.value = null
-                // Close the landmarker on the analysis thread, after any frame still in flight.
-                executor.execute { landmarker.close() }
-                executor.shutdown()
-            }
-        }
+        awaitClose { release() }
     }
 
     /**
-     * The gyro joystick: the phone's own tilt, with the camera left closed. A real control the user
-     * chose, so unlike [simulatedSession] it is not labelled as a demo and has no fallback reason.
+     * The gyro joystick: the phone's own tilt steers the stick. A real control the user chose, so
+     * unlike [simulatedSession] it is not labelled as a demo and has no fallback reason.
+     *
+     * The camera still runs alongside it, but only for face *expressions* (see [gyroExpressions]),
+     * so an eyebrow raise or a smile mapped to an action keeps working. Without the camera the stick
+     * works on its own.
      */
     private fun gyroSession(): Flow<FaceState> = channelFlow {
         val base = FaceState(source = TrackingSource.GYRO, status = TrackingStatus.Starting)
@@ -355,14 +390,39 @@ class MediaPipeFaceTrackingManager(
         }
         val processor = FaceFrameProcessor().also { activeProcessor = it }
         val tuningState = tuning.stateIn(this)
+        val expressions = MutableStateFlow(GestureReading.NONE)
         send(base)
+        launch { gyroExpressions(tuningState).collect { expressions.value = it } }
         gyro.poses().collect { (pose, timestamp) ->
             val frameTuning = tuningState.value
-            // No blendshapes at all: there is no face in this pipeline, so no face gesture can be
-            // read out of tilting the phone.
+            // No blendshapes here: the pose is the phone's, and it only steers. Its gesture reading
+            // is replaced by the camera's expressions, since tilting the phone fires nothing.
             val next = processor.process(pose, emptyMap(), timestamp, frameTuning, base)
             processor.actionableStarts(next, frameTuning.controls).forEach { _gestureEvents.tryEmit(it) }
-            send(next)
+            send(next.copy(gesture = expressions.value))
+        }
+    }
+
+    /**
+     * Face expressions for the gyro joystick, read from the camera and fired as gesture events.
+     * Head tilt, nod and shake are left out: the camera sees the head move every time the phone
+     * tilts, so they would fire while the user is only steering. Emits nothing when the camera
+     * can't run (no permission, no front camera).
+     */
+    private fun gyroExpressions(tuningState: StateFlow<TrackingTuning>): Flow<GestureReading> = flow {
+        val camera = prepareCamera() as? CameraSetup.Ready ?: return@flow
+        val classifier = GestureClassifier()
+        try {
+            faceLandmarks(camera, withPreview = false).collect { (result, timestamp) ->
+                val controls = tuningState.value.controls
+                // No pose, so only blendshape gestures are measured; no face means no blendshapes,
+                // which releases anything that was held.
+                val reading = classifier.classify(result.blendshapeScores(), null, timestamp, controls::sensitivityOf)
+                reading.started.filter(controls::isGestureEnabled).forEach { _gestureEvents.tryEmit(it) }
+                emit(reading)
+            }
+        } catch (e: CameraBindException) {
+            emit(GestureReading.NONE)
         }
     }
 

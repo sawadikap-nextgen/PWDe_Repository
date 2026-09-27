@@ -252,7 +252,7 @@ object JoystickMapper {
     private const val GYRO_MAX_FULL_TILT_DEGREES = 30f
 
     /** How much larger the gyro's dead zone is than the head's. See [deadZoneDegrees]. */
-    private const val GYRO_DEAD_ZONE_FACTOR = 1.6f
+    private const val GYRO_DEAD_ZONE_FACTOR = 2.2f
 }
 
 /**
