@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Delete
@@ -37,7 +38,6 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Save
-import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.MaterialTheme
@@ -97,7 +97,8 @@ import com.pwde.app.ui.components.voiceCommand
 import com.pwde.app.data.local.inputModeOrDefault
 import com.pwde.app.ui.theme.PwdeShapes
 import com.pwde.app.ui.theme.PwdeTheme
-
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.layout.heightIn
 // ---------------- Choose game / calibration ----------------
 
 @Composable
@@ -460,13 +461,12 @@ private val SELECTED_COLOR = Color(0xFFFFE600)
 internal val TRIGGER_COMMANDS = listOf(
     voiceCommand("type:VOICE", "voice", "voice command"),
     voiceCommand("type:GESTURE", "gesture", "head gesture"),
-    voiceCommand("type:JOYSTICK", "joystick", "joystick action"),
+    voiceCommand("previous_button", "previous", "back"), // Added
     voiceCommand("next_button", "next", "next button"),
     voiceCommand("close", "close", "cancel"),
-    voiceCommand("done", "done", "finished"),
+    voiceCommand("use_all_suggested", "use all suggested words", "auto map"), // Added
 ) + JoystickDirection.entries.filter { it != JoystickDirection.CENTER }
     .map { voiceCommand("dir:${it.name}", "stick ${it.label.lowercase()}") }
-
 private val TRIGGER_PANEL_COMMANDS = listOf(
     voiceCommand("show_controls", *GameInput.SHOW_CONTROLS_PHRASES.toTypedArray()),
     voiceCommand("hide_controls", *GameInput.HIDE_CONTROLS_PHRASES.toTypedArray()),
@@ -495,7 +495,9 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
                 type = TriggerType.JOYSTICK
                 viewModel.setTrigger(it.id, ButtonTrigger(TriggerType.JOYSTICK, id.removePrefix("dir:")))
             }
+            id == "previous_button" -> viewModel.previousButtonToAssign() // Added
             id == "next_button" -> viewModel.nextButtonToAssign()
+            id == "use_all_suggested" -> viewModel.mapAllSuggestedWords() // Added
             id == "close" -> viewModel.openTriggerChooser(null)
             id == "show_controls" -> viewModel.setControlsShown(true)
             id == "hide_controls" -> viewModel.setControlsShown(false)
@@ -509,15 +511,37 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         viewModel, ui,
         title = "Choose how to press each button",
         says = if (selected != null) "How to press ${selected.label}?" else "Tap a button or say its name, then choose how to press it.",
-        voiceHint = if (selected != null) "Say \"voice\", \"gesture\", \"joystick\", \"next button\" or \"done\""
-        else "Say a button name, \"next button\", \"show controls\", \"hide panel\" or \"done\"",
+        voiceHint = if (selected != null) "Say \"voice\", \"gesture\", \"joystick\", \"previous\", \"next\" or \"use all suggested words\""
+        else "Say a button name, \"next\", \"show controls\", \"hide panel\" or \"use all suggested words\"",
         footer = {
-            SideButton(
-                if (mapped == buttons.size) "Test controls" else "Done: $mapped/${buttons.size}",
-                viewModel::triggersDone,
-                icon = Icons.Outlined.CheckCircle,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (ui.canUndoAutoMap) {
+                // Show Undo and Done buttons after auto-mapping
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)
+                ) {
+                    SideButton(
+                        "Undo",
+                        viewModel::undoMapAllSuggestedWords,
+                        icon = Icons.AutoMirrored.Outlined.ArrowBack,
+                        modifier = Modifier.weight(1f)
+                    )
+                    SideButton(
+                        "Done Mapping",
+                        viewModel::triggersDone,
+                        icon = Icons.Outlined.CheckCircle,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            } else {
+                // Show the original button before auto-mapping
+                SideButton(
+                    "Use All Suggested Words",
+                    viewModel::mapAllSuggestedWords,
+                    icon = Icons.Outlined.AutoAwesome,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         },
         stage = {
             ButtonCanvas(
@@ -555,7 +579,6 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         }
     }
 }
-
 @Composable
 private fun TriggerChooser(
     viewModel: GabAiViewModel,
@@ -569,73 +592,143 @@ private fun TriggerChooser(
     val trigger = button.trigger
     val conflicts = trigger?.let { value -> buttons.filter { it.id != button.id && it.trigger == value }.map { it.label } }.orEmpty()
     val gestureOff = trigger?.gesture?.let { it !in gestures } == true
-    GradientCard(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(button.label, style = MaterialTheme.typography.titleSmall, color = colors.text, modifier = Modifier.weight(1f))
-            IconButton(onClick = { viewModel.openTriggerChooser(null) }) {
-                Icon(Icons.Outlined.Close, contentDescription = "Close", tint = colors.primary)
-            }
-        }
-        SegmentedToggle(TriggerType.entries, type, { it.label.substringBefore(' ') }, onType)
-        when (type) {
-            TriggerType.VOICE -> {
-                val phrase = if (trigger?.type == TriggerType.VOICE) trigger.value else ""
-                PwdeTextField(
-                    "What will you say?",
-                    phrase,
-                    { viewModel.setTrigger(button.id, if (it.isBlank()) null else ButtonTrigger(TriggerType.VOICE, it)) },
-                )
-                if (phrase.isEmpty()) {
-                    SideButton(
-                        "Use \"${button.label.lowercase()}\"",
-                        { viewModel.setTrigger(button.id, ButtonTrigger(TriggerType.VOICE, button.label.lowercase())) },
-                        style = ButtonStyle.SECONDARY,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-            }
-            TriggerType.GESTURE -> {
-                if (gestures.isEmpty()) {
-                    Text("No gestures enabled for this calibration.", style = MaterialTheme.typography.bodySmall, color = colors.warning)
-                } else {
-                    ChipGrid(
-                        items = gestures,
-                        label = { it.label },
-                        selected = { trigger?.type == TriggerType.GESTURE && trigger.value == it.name },
-                        onPick = { viewModel.pickGesture(button.id, it) },
-                    )
-                }
-            }
-            TriggerType.JOYSTICK -> ChipGrid(
-                items = JoystickDirection.entries.filter { it != JoystickDirection.CENTER },
-                label = { it.label },
-                selected = { trigger?.type == TriggerType.JOYSTICK && trigger.value == it.name },
-                onPick = { viewModel.setTrigger(button.id, ButtonTrigger(TriggerType.JOYSTICK, it.name)) },
-            )
-            TriggerType.MOVEMENT -> Text(
-                "This button is assigned to the head movement joystick.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textMuted,
-            )
-        }
-        trigger?.let { StatusPill("Pressed by: ${it.describe()}", icon = Icons.Outlined.CheckCircle) }
-        if (gestureOff) Text("Gesture is not enabled in this calibration.", style = MaterialTheme.typography.bodySmall, color = colors.warning)
-        if (conflicts.isNotEmpty()) StatusPill("Also used by ${conflicts.joinToString()}", color = colors.warning, icon = Icons.Outlined.WarningAmber)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SideButton("Next", viewModel::nextButtonToAssign, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.SkipNext, modifier = Modifier.weight(1f))
-            SideButton("Done", { viewModel.openTriggerChooser(null) }, enabled = trigger != null, icon = Icons.Outlined.CheckCircle, modifier = Modifier.weight(1f))
-        }
-    }
-}
 
-@Composable
-private fun <T> ChipGrid(items: List<T>, label: (T) -> String, selected: (T) -> Boolean, onPick: (T) -> Unit) {
-    items.chunked(2).forEach { row ->
-        Row(horizontalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
-            row.forEach { item ->
-                OptionCard(label(item), null, selected(item), { onPick(item) }, kind = OptionKind.RADIO, modifier = Modifier.weight(1f))
+    // Filter out JOYSTICK and MOVEMENT
+    val availableTriggerTypes = TriggerType.entries.filter {
+        it != TriggerType.JOYSTICK && it != TriggerType.MOVEMENT
+    }
+
+    GradientCard(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header Row
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = button.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = colors.text,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                IconButton(onClick = { viewModel.openTriggerChooser(null) }) {
+                    Icon(Icons.Outlined.Close, contentDescription = "Close", tint = colors.primary)
+                }
             }
-            if (row.size == 1) Box(Modifier.weight(1f))
+
+            // Segmented Toggle - with correct parameter names
+            SegmentedToggle(
+                options = availableTriggerTypes,
+                selected = type,
+                label = { it.label },
+                onSelect = onType,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+            )
+
+            // Content based on type
+            when (type) {
+                TriggerType.VOICE -> {
+                    val phrase = if (trigger?.type == TriggerType.VOICE) trigger.value else ""
+                    PwdeTextField(
+                        label = "What will you say?",
+                        value = phrase,
+                        onValueChange = { viewModel.setTrigger(button.id, if (it.isBlank()) null else ButtonTrigger(TriggerType.VOICE, it)) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (phrase.isEmpty()) {
+                        SideButton(
+                            "Use \"${button.label.lowercase()}\"",
+                            { viewModel.setTrigger(button.id, ButtonTrigger(TriggerType.VOICE, button.label.lowercase())) },
+                            style = ButtonStyle.SECONDARY,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+                TriggerType.GESTURE -> {
+                    val availableGestures = FacialGesture.selectable
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        availableGestures.forEach { gesture ->
+                            OptionCard(
+                                title = gesture.label,
+                                description = null,
+                                selected = trigger?.type == TriggerType.GESTURE && trigger.value == gesture.name,
+                                onClick = { viewModel.pickGesture(button.id, gesture) },
+                                kind = OptionKind.RADIO,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
+                else -> {
+                    Text(
+                        text = "This trigger type is not available.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textMuted
+                    )
+                }
+            }
+
+            // Status & Warning Pills
+            trigger?.let {
+                StatusPill(
+                    text = "Pressed by: ${it.describe()}",
+                    icon = Icons.Outlined.CheckCircle
+                )
+            }
+
+            if (gestureOff) {
+                Text(
+                    text = "Gesture is not enabled in this calibration.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.warning
+                )
+            }
+
+            if (conflicts.isNotEmpty()) {
+                StatusPill(
+                    text = "Also used by ${conflicts.joinToString()}",
+                    color = colors.warning,
+                    icon = Icons.Outlined.WarningAmber
+                )
+            }
+
+            // Navigation Buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SideButton(
+                    "Previous",
+                    viewModel::previousButtonToAssign,
+                    style = ButtonStyle.SECONDARY,
+                    icon = Icons.AutoMirrored.Outlined.ArrowBack,
+                    modifier = Modifier.weight(1f)
+                )
+                SideButton(
+                    "Next",
+                    viewModel::nextButtonToAssign,
+                    style = ButtonStyle.SECONDARY,
+                    icon = Icons.Outlined.SkipNext,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
@@ -652,6 +745,7 @@ internal fun TestControlsStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         title = "Test controls",
         says = "Try out your controls now! Perform a gesture or say a command to test your mappings.",
         voiceHint = "Say a command or tap Next",
+        // In AssignTriggersStep footer:
         footer = {
             PwdeButton(
                 "Next",
@@ -659,7 +753,7 @@ internal fun TestControlsStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
                 icon = Icons.AutoMirrored.Outlined.ArrowForward,
                 modifier = Modifier.fillMaxWidth(),
             )
-        },
+        }
     ) {
         ButtonCanvas(
             ui.screenshot,
