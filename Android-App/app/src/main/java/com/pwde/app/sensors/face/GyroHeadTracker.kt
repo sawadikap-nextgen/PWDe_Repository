@@ -5,46 +5,47 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.hardware.display.DisplayManager
 import android.os.SystemClock
 import android.util.Log
+import android.view.Display
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.exp
 
 /**
- * Device tilt from the rotation sensor: the phone tilts where the head would, so the user can steer
- * the joystick without pointing a camera at their face. The camera never opens for this.
+ * The gyro joystick's input: tilting the phone steers Mobile Legends' movement stick, with the
+ * camera left closed. See [GyroPoseMath] for which tilt means which direction.
  *
- * `TYPE_ROTATION_VECTOR` is preferred because it is fused with the magnetometer, which pins the frame
- * the tilt is measured in; a phone without one falls back to `TYPE_GAME_ROTATION_VECTOR`. Only the
- * sensor's own X and Y axes are used (see [GyroPoseMath]), so the yaw a game-rotation-vector slowly
- * loses cannot reach the stick.
+ * Reads the fused gravity sensor (gyroscope + accelerometer, already smooth and free of hand
+ * jolts), falling back to the raw accelerometer, low-passed, on phones without one.
  *
- * The pose is the movement from the neutral the phone was held in when this started, so no absolute
- * heading is ever needed and the user can hold the phone however is comfortable. [rebaseline]
- * re-takes that neutral — "set center here" — and the neutral is also re-taken on its own whenever the
- * phone rests near it, so drift and a change of grip cannot leave the stick creeping off centre.
+ * The neutral is how the phone is held when this starts: the average of the first few readings, so
+ * a jolt while picking it up doesn't become the centre. [rebaseline] ("set center here") takes it
+ * again. Gravity doesn't drift, so the neutral is never moved behind the user's back.
  */
 class GyroHeadTracker(context: Context) {
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-    private val sensor: Sensor? = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
-        ?: sensorManager?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+    private val sensor: Sensor? = sensorManager?.getDefaultSensor(Sensor.TYPE_GRAVITY)
+        ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+    private val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
 
     /** Set by [rebaseline] and consumed by the next sample, on the sensor's own thread. */
     private val rebaselineRequested = AtomicBoolean(false)
 
     val isAvailable: Boolean get() = sensor != null
 
-    /** The next sample becomes the new neutral: "wherever the phone is now is straight ahead". */
+    /** The next readings become the new neutral: "wherever the phone is now is straight ahead". */
     fun rebaseline() {
         rebaselineRequested.set(true)
     }
 
-    /**
-     * Emits (pose, timestampMs). Every pose is relative to the neutral, so the first sample after
-     * starting — or after a [rebaseline] — is [HeadPose.NEUTRAL].
-     */
+    private fun displayRotation(): Int =
+        displayManager?.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: GyroPoseMath.ROTATION_0
+
+    /** Emits (pose, timestampMs), relative to the neutral; [HeadPose.NEUTRAL] while it is being taken. */
     fun poses(): Flow<Pair<HeadPose, Long>> = callbackFlow {
         val manager = sensorManager
         val source = sensor
@@ -52,44 +53,53 @@ class GyroHeadTracker(context: Context) {
             close()
             return@callbackFlow
         }
-        val current = FloatArray(9)
-        var neutral: FloatArray? = null
-        var nearNeutralSince: Long? = null
+        val rawAccelerometer = source.type == Sensor.TYPE_ACCELEROMETER
+        val up = FloatArray(3)
+        var haveUp = false
+        var lastSampleMs = 0L
+
+        var neutral: GyroPoseMath.Tilt? = null
+        var neutralRotation = -1
+        var sideSum = 0f
+        var forwardSum = 0f
+        var neutralSamples = 0
+
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
-                SensorManager.getRotationMatrixFromVector(current, event.values)
                 val now = SystemClock.uptimeMillis()
-                // Consumed before the null check, so an explicit recenter is never swallowed just
-                // because the first sample happened to arrive at the same moment.
-                val recenterRequested = rebaselineRequested.getAndSet(false)
-                if (neutral == null || recenterRequested) {
-                    // The neutral is taken as it is: it is the pose the user is holding now, not a
-                    // reading to be averaged into.
-                    neutral = current.clone()
-                    nearNeutralSince = null
-                    if (recenterRequested) Log.i(TAG, "Neutral re-anchored on request")
+                if (rawAccelerometer && haveUp) {
+                    // The accelerometer also feels every shake; keep only the slow part, which is gravity.
+                    val keep = exp(-(now - lastSampleMs).coerceAtLeast(1) / ACCELEROMETER_TAU_MS)
+                    for (i in 0..2) up[i] = up[i] * keep + event.values[i] * (1f - keep)
+                } else {
+                    event.values.copyInto(up, endIndex = 3)
+                }
+                haveUp = true
+                lastSampleMs = now
+
+                val rotation = displayRotation()
+                val tilt = GyroPoseMath.tilt(GyroPoseMath.toScreen(up, rotation)) ?: return
+                // Turning the phone round for the game changes what "right" means: start again.
+                if (rebaselineRequested.getAndSet(false) || rotation != neutralRotation) {
+                    neutral = null
+                    neutralRotation = rotation
+                    sideSum = 0f
+                    forwardSum = 0f
+                    neutralSamples = 0
+                }
+                val anchor = neutral
+                if (anchor == null) {
+                    sideSum += tilt.side
+                    forwardSum += tilt.forward
+                    neutralSamples++
+                    if (neutralSamples >= NEUTRAL_SAMPLES) {
+                        neutral = GyroPoseMath.Tilt(sideSum / neutralSamples, forwardSum / neutralSamples)
+                        Log.i(TAG, "Neutral taken: $neutral at rotation $rotation")
+                    }
                     trySend(HeadPose.NEUTRAL to now)
                     return
                 }
-                val anchor = neutral ?: return
-                // Self-heal. The sensor drifts slowly and a change of grip moves the neutral, either
-                // of which would leave the stick permanently off centre and creeping. While the
-                // phone rests at the neutral the stick is centred anyway, so re-anchor to it.
-                val rel = GyroPoseMath.relativeDegrees(anchor, current)
-                if (rel[0] * rel[0] + rel[1] * rel[1] < AUTO_RECENTER_DEGREES * AUTO_RECENTER_DEGREES) {
-                    val since = nearNeutralSince ?: now
-                    nearNeutralSince = since
-                    if (now - since >= AUTO_RECENTER_MS) {
-                        neutral = current.clone()
-                        nearNeutralSince = null
-                        Log.i(TAG, "Neutral re-anchored: the phone rested at it for ${AUTO_RECENTER_MS}ms")
-                        trySend(HeadPose.NEUTRAL to now)
-                        return
-                    }
-                } else {
-                    nearNeutralSince = null
-                }
-                trySend(GyroPoseMath.pose(anchor, current) to now)
+                trySend(GyroPoseMath.pose(anchor, tilt) to now)
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
@@ -101,21 +111,10 @@ class GyroHeadTracker(context: Context) {
     private companion object {
         private const val TAG = "GyroHeadTracker"
 
-        /**
-         * How close to the neutral the phone must be resting before the neutral is re-taken.
-         *
-         * **This must stay below the smallest dead-zone setting** — 1° at Dead zone level 1 — because
-         * otherwise it fires while the stick is genuinely deflected. Re-anchoring zeroes the
-         * deflection, so the stick is yanked to the middle and then jerks back out: a centre-to-side
-         * flicker every couple of seconds, which is exactly what a mis-set radius looks like.
-         *
-         * The reference can use a larger 1.5° radius only because its dead zone is 3.2° in the same
-         * units, i.e. it stays at about half of it. This is that same half, against this app's
-         * smallest dead zone rather than against a fixed full-scale tilt.
-         */
-        const val AUTO_RECENTER_DEGREES = 0.5f
+        /** Readings averaged into the neutral: about a fifth of a second at SENSOR_DELAY_GAME. */
+        const val NEUTRAL_SAMPLES = 10
 
-        /** How long the phone must rest near the neutral before it becomes the new neutral. */
-        const val AUTO_RECENTER_MS = 2_500L
+        /** The raw accelerometer's low-pass time constant, in ms. */
+        const val ACCELEROMETER_TAU_MS = 80f
     }
 }

@@ -349,7 +349,7 @@ class MediaPipeFaceTrackingManager(
     private fun gyroSession(): Flow<FaceState> = channelFlow {
         val base = FaceState(source = TrackingSource.GYRO, status = TrackingStatus.Starting)
         if (!gyro.isAvailable) {
-            send(base.copy(status = TrackingStatus.Unavailable("This phone has no gyroscope or rotation sensor")))
+            send(base.copy(status = TrackingStatus.Unavailable("This phone has no motion sensor to tilt with")))
             awaitClose()
             return@channelFlow
         }

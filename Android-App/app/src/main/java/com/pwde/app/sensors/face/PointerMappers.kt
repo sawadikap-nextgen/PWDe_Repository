@@ -245,11 +245,11 @@ object JoystickMapper {
      * Phone tilt for full deflection at [DEFAULT_LEVEL]. Well under the reference's 40°: a phone is a
      * coarser thing to steer than a head, and 40° is a chore rather than a steering movement.
      */
-    private const val GYRO_FULL_TILT_DEGREES = 25f
+    private const val GYRO_FULL_TILT_DEGREES = 16f
 
     /** Bounds on the gyro curve, so no level is unusably dead or unusably twitchy. */
-    private const val GYRO_MIN_FULL_TILT_DEGREES = 10f
-    private const val GYRO_MAX_FULL_TILT_DEGREES = 45f
+    private const val GYRO_MIN_FULL_TILT_DEGREES = 6f
+    private const val GYRO_MAX_FULL_TILT_DEGREES = 30f
 
     /** How much larger the gyro's dead zone is than the head's. See [deadZoneDegrees]. */
     private const val GYRO_DEAD_ZONE_FACTOR = 1.6f

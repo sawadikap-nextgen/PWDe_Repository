@@ -298,7 +298,7 @@ class JoystickMapperTest {
      */
     @Test
     fun theGyroIsMoreSensitiveButIgnoresMoreSmallMovementFirst() {
-        assertEquals(25f, JoystickMapper.gyroFullScaleDegrees(DEFAULT_LEVEL), 0.001f)
+        assertEquals(16f, JoystickMapper.gyroFullScaleDegrees(DEFAULT_LEVEL), 0.001f)
         assertTrue(JoystickMapper.gyroFullScaleDegrees(DEFAULT_LEVEL) > JoystickMapper.fullScaleDegrees(DEFAULT_LEVEL))
         assertTrue(
             JoystickMapper.deadZoneDegrees(tuning.deadZone, JoystickSource.GYRO) >
@@ -306,7 +306,7 @@ class JoystickMapperTest {
         )
         // Higher sensitivity still needs less tilt, and no level is unusably dead or twitchy.
         assertTrue(JoystickMapper.gyroFullScaleDegrees(10) < JoystickMapper.gyroFullScaleDegrees(DEFAULT_LEVEL))
-        assertTrue(JoystickMapper.gyroFullScaleDegrees(1) <= 45f)
+        assertTrue(JoystickMapper.gyroFullScaleDegrees(1) <= 30f)
     }
 
     /** The phone still needs more tilt than a head for the same deflection, just less than before. */
