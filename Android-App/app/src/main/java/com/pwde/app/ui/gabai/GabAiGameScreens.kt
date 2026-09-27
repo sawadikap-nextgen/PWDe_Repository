@@ -43,6 +43,7 @@ import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -481,6 +482,11 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     val mapped = buttons.count { it.trigger != null }
     val gestures by viewModel.triggerGestures.collectAsStateWithLifecycle()
     var type by rememberSaveable(selected?.id) { mutableStateOf(selected?.trigger?.type ?: TriggerType.VOICE) }
+    // Open the first unmapped button immediately; for a saved profile, start on its first button so
+    // every existing mapping can be reviewed or changed without a voice command.
+    LaunchedEffect(ui.state) {
+        if (buttons.isNotEmpty() && ui.selectedButtonId == null) viewModel.nextButtonToAssign()
+    }
     val commands = remember(buttons.map { it.id to it.label }, gestures) {
         TRIGGER_COMMANDS + TRIGGER_PANEL_COMMANDS +
             buttons.map { voiceCommand("button:${it.id}", it.label.lowercase()) } +
@@ -511,37 +517,35 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         viewModel, ui,
         title = "Choose how to press each button",
         says = if (selected != null) "How to press ${selected.label}?" else "Tap a button or say its name, then choose how to press it.",
-        voiceHint = if (selected != null) "Say \"voice\", \"gesture\", \"joystick\", \"previous\", \"next\" or \"use all suggested words\""
-        else "Say a button name, \"next\", \"show controls\", \"hide panel\" or \"use all suggested words\"",
+        voiceHint = if (selected != null) "Say \"voice\", \"gesture\", \"joystick\", \"previous\", \"next\" or \"done mapping\""
+        else "Tap Map beside a button, tap it on the game screen, or say its name",
         footer = {
-            if (ui.canUndoAutoMap) {
-                // Show Undo and Done buttons after auto-mapping
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)
-                ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap),
+            ) {
+                if (ui.canUndoAutoMap) {
                     SideButton(
                         "Undo",
                         viewModel::undoMapAllSuggestedWords,
                         icon = Icons.AutoMirrored.Outlined.ArrowBack,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
                     )
+                } else {
                     SideButton(
-                        "Done Mapping",
-                        viewModel::triggersDone,
-                        icon = Icons.Outlined.CheckCircle,
-                        modifier = Modifier.weight(1f)
+                        "Use All Suggested Words",
+                        viewModel::mapAllSuggestedWords,
+                        icon = Icons.Outlined.AutoAwesome,
+                        modifier = Modifier.weight(1.4f),
                     )
                 }
-            } else {
-                // Show the original button before auto-mapping
                 SideButton(
-                    "Use All Suggested Words",
-                    viewModel::mapAllSuggestedWords,
-                    icon = Icons.Outlined.AutoAwesome,
-                    modifier = Modifier.fillMaxWidth(),
+                    "Done Mapping",
+                    viewModel::triggersDone,
+                    icon = Icons.Outlined.CheckCircle,
+                    modifier = Modifier.weight(1f),
                 )
-            }
+                    }
         },
         stage = {
             ButtonCanvas(
@@ -570,6 +574,36 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
                 color = if (mapped == buttons.size) PwdeTheme.colors.primary else PwdeTheme.colors.warning,
                 icon = if (mapped == buttons.size) Icons.Outlined.CheckCircle else Icons.Outlined.TouchApp,
             )
+        }
+        SectionTitle("Map or change a button")
+        Text(
+            "Choose any row to assign or replace its control. Saved profiles can be edited the same way.",
+            style = MaterialTheme.typography.bodySmall,
+            color = PwdeTheme.colors.textMuted,
+        )
+        buttons.forEach { button ->
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(button.label, style = MaterialTheme.typography.labelLarge, color = PwdeTheme.colors.text)
+                    Text(
+                        button.trigger?.describe() ?: "Not mapped",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (button.trigger == null) PwdeTheme.colors.warning else PwdeTheme.colors.textMuted,
+                    )
+                }
+                SideButton(
+                    if (button.trigger == null) "Map" else "Edit",
+                    { viewModel.openTriggerChooser(button.id) },
+                    style = if (button.id == ui.selectedButtonId) ButtonStyle.PRIMARY else ButtonStyle.SECONDARY,
+                    modifier = Modifier.weight(0.65f),
+                )
+            }
+        }
+        if (selected == null) {
             if (ui.controlsShown) {
                 ControlsList(buttons, onClose = { viewModel.setControlsShown(false) })
             } else {

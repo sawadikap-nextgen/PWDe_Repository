@@ -253,13 +253,18 @@ class GabAiPersistenceTest {
         assertEquals(GabAiState.ButtonMapping(1), editor.ui.value.state)
         editor.renameButton(editor.ui.value.form.buttons.single().id, "Deploy")
         editor.buttonsDone()
+        val editedButton = editor.ui.value.form.buttons.single()
+        editor.openTriggerChooser(editedButton.id)
+        editor.setTrigger(editedButton.id, ButtonTrigger(TriggerType.VOICE, "deploy"))
         editor.triggersDone()
         editor.testingDone()
         editor.saveGameProfile()
         settle()
         val all = runBlocking { profiles.gameProfiles.first() }
         assertEquals(1, all.size)
-        assertEquals("Deploy", ControlJson.decodeButtons(all.single().buttonMappingsJson).single().label)
+        val savedButton = ControlJson.decodeButtons(all.single().buttonMappingsJson).single()
+        assertEquals("Deploy", savedButton.label)
+        assertEquals(ButtonTrigger(TriggerType.VOICE, "deploy"), savedButton.trigger)
     }
 
     /** The next navigation request, or null if none arrives. */

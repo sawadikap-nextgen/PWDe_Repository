@@ -311,7 +311,7 @@ fun ProfileScreen(
                             )
                         }
                         PwdeButton(
-                            "Edit buttons",
+                            "Edit buttons & mappings",
                             { onEditGameProfile(it.id) },
                             style = ButtonStyle.SECONDARY,
                             icon = Icons.Outlined.AutoAwesome,
