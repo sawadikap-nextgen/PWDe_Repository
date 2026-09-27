@@ -18,7 +18,6 @@ import com.pwde.app.data.local.ControlJson
 import com.pwde.app.data.local.ControlsRepository
 import com.pwde.app.data.local.GameProfile
 import com.pwde.app.data.local.ProfileRepository
-import com.pwde.app.data.local.enabledGestures
 import com.pwde.app.data.local.toCalibrationProfile
 import com.pwde.app.data.model.ButtonTrigger
 import com.pwde.app.data.model.CursorTuning
@@ -93,6 +92,7 @@ data class GabAiUiState(
     val sidebarOpen: Boolean = true,
     /** The test step's latest result: a button pressed, or something heard that isn't one. */
     val testHit: TestHit? = null,
+    val canUndoAutoMap: Boolean = false,
 ) {
     val state: GabAiState get() = session?.state ?: GabAiState.Welcome
     val form: GabAiForm get() = session?.form ?: GabAiForm()
@@ -116,11 +116,16 @@ class GabAiViewModel(
     faceTracking: FaceTrackingManager,
     start: GabAiStart,
     private val hudDetector: HudDetector = HudDetector.None,
-    /** The speech model gameplay presses mapped buttons with (see `InGameVoiceEngine.modelLabel`). */
+    /** The speech model the test step presses mapped buttons with (see `InGameVoiceEngine.modelLabel`). */
     val buttonSpeechModel: String = "Unknown",
-    /** Gameplay's own voice engine, so the test step hears button phrases exactly as a game would. */
+    /**
+     * The engine the test step listens with. In-app it is the app-wide recognizer (`AppContainer`'s
+     * `inAppVoiceEngine`): GabAI runs with PWDe on screen, where the user is already speaking to that
+     * one, so the test hears exactly what a spoken button phrase would do. Only a live session over
+     * the real game uses the sherpa-onnx spotter.
+     */
     private val inGameVoice: InGameVoiceEngine? = null,
-    /** A live session shares [inGameVoice]; testing waits for it to end. */
+    /** The test waits for a live session over the real game to end: it takes the mic for itself. */
     private val livePlay: LivePlay? = null,
 ) : FaceTrackingViewModel(faceTracking) {
     /** The speech model behind GabAI's own voice commands and "assign/use" dictation. */
@@ -139,14 +144,8 @@ class GabAiViewModel(
         .map { it.gestureSensitivity }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    /** Gestures a button can use: those the chosen calibration's gesture test enabled. */
-    val triggerGestures: StateFlow<List<FacialGesture>> = combine(
-        _ui.map { it.form.calibrationProfileId }.distinctUntilChanged(),
-        calibrationProfiles,
-    ) { id, profiles ->
-        val enabled = profiles.firstOrNull { it.id == id }?.enabledGestures
-        FacialGesture.curated.filter { it.isEnabledBy(enabled) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FacialGesture.curated)
+    /** Gestures a button can use: all selectable gestures. */
+    val triggerGestures: StateFlow<List<FacialGesture>> = MutableStateFlow(FacialGesture.selectable)
 
     private val _navigation = Channel<GabAiNavigation>(Channel.BUFFERED)
     val navigation: Flow<GabAiNavigation> = _navigation.receiveAsFlow()
@@ -847,6 +846,49 @@ class GabAiViewModel(
         "My ${form.calibrationMode.label.lowercase()} setup ${calibrationProfiles.value.size + 1}"
 
     private fun defaultProfileName(game: Game): String = "${game.displayName} profile ${gameProfiles.value.count { it.gameId == game.id } + 1}"
+    private var previousButtonsForUndo: List<MappedButton>? = null
+
+    // 1. Function to go to the previous button
+    fun previousButtonToAssign() {
+        val buttons = _ui.value.form.buttons
+        if (buttons.isEmpty()) return
+
+        val from = buttons.indexOfFirst { it.id == _ui.value.selectedButtonId }
+        val previousIndex = (from - 1 + buttons.size) % buttons.size
+
+        openTriggerChooser(buttons[previousIndex].id)
+    }
+
+    // 2. Function to map all suggested words
+    fun mapAllSuggestedWords() {
+        val currentButtons = _ui.value.form.buttons
+
+        // Save current state for undo
+        previousButtonsForUndo = currentButtons
+
+        // Apply the auto-mapping
+        currentButtons.forEach { button ->
+            setTrigger(button.id, ButtonTrigger(TriggerType.VOICE, button.label.lowercase()))
+        }
+
+        // Update UI state and close chooser
+        _ui.update { it.copy(canUndoAutoMap = true) }
+        openTriggerChooser(null)
+        message("All buttons mapped to suggested words.")
+    }
+
+    // 3. Function to undo the auto-mapping
+    fun undoMapAllSuggestedWords() {
+        val previous = previousButtonsForUndo ?: return
+
+        // Restore the previous button states
+        editButtons { previous }
+
+        // Clear the undo state
+        previousButtonsForUndo = null
+        _ui.update { it.copy(canUndoAutoMap = false) }
+        message("Auto-mapping undone.")
+    }
 }
 
 /** Said on the test step, where the in-game engine has the mic; the screen shows them too. */

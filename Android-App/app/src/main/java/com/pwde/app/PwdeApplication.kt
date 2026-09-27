@@ -10,5 +10,7 @@ class PwdeApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // "Is the user in PWDe?" — the accessibility service and the voice split both read this.
+        registerActivityLifecycleCallbacks(container.pwdeVisibility)
     }
 }

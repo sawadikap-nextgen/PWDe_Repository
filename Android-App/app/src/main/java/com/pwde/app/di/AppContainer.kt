@@ -22,6 +22,7 @@ import com.pwde.app.data.prefs.CalibrationOverlayState
 import com.pwde.app.play.LivePlay
 import com.pwde.app.sensors.face.FaceTrackingManager
 import com.pwde.app.sensors.face.MediaPipeFaceTrackingManager
+import com.pwde.app.sensors.voice.AdaptiveVoiceEngine
 import com.pwde.app.sensors.voice.AndroidVoiceCommandManager
 import com.pwde.app.sensors.voice.InGameVoiceEngine
 import com.pwde.app.sensors.voice.MicArbiter
@@ -53,6 +54,9 @@ class AppContainer(private val context: Context) {
         MediaPipeFaceTrackingManager(context, controlsRepository, settingsRepository)
     }
 
+    /** Whether the user is in the PWDe app right now: the voice engine split and the overlay read it. */
+    val pwdeVisibility by lazy { PwdeVisibility() }
+
     /** Makes sure gameplay's voice engine and the app-wide one never listen at the same time. */
     private val micArbiter by lazy { MicArbiter() }
 
@@ -80,12 +84,36 @@ class AppContainer(private val context: Context) {
      * platform recognizer on devices it can't (non-arm64, or a checkout without the model).
      * GameplayViewModel and everything above it depend only on the interface.
      */
+    /**
+     * What a live session listens with. It is [AdaptiveVoiceEngine], which is sherpa-onnx over the real
+     * game and stands down while PWDe is in front so the app-wide recognizer (Google) is the one
+     * listening. The engine is chosen by **where the user is**, live, not once when the session starts.
+     */
     val inGameVoiceEngine: InGameVoiceEngine by lazy {
-        if (SherpaSupport.isSupported(context)) {
-            SherpaInGameVoiceEngine(context, controlsRepository, micArbiter, wakeWordTuningStore)
-        } else {
-            SpeechRecognizerInGameVoiceEngine(context, controlsRepository, micArbiter)
-        }
+        AdaptiveVoiceEngine(
+            overGame =
+                if (SherpaSupport.isSupported(context)) {
+                    SherpaInGameVoiceEngine(context, controlsRepository, micArbiter, wakeWordTuningStore)
+                } else {
+                    SpeechRecognizerInGameVoiceEngine(context, controlsRepository, micArbiter)
+                },
+            inAppLabel = voiceCommandManager.modelLabel.substringBefore(" ·"),
+            pwdeInForeground = pwdeVisibility.inForeground,
+        )
+    }
+
+    /**
+     * Voice for the flows that press a game's buttons **on PWDe's own screens** — the in-app Play
+     * preview and GabAI's controls test. These run with PWDe in front, where the app-wide navigation
+     * voice (also Android `SpeechRecognizer`, i.e. Google's service) is listening anyway, so they use
+     * the same recognizer and the user's match/activation modes.
+     *
+     * Only a live session over the real game gets [inGameVoiceEngine]'s sherpa-onnx spotter, which is
+     * built for a phrase list heard over the game's own audio. Both take the mic through [MicArbiter],
+     * so they still never listen at the same time.
+     */
+    val inAppVoiceEngine: InGameVoiceEngine by lazy {
+        SpeechRecognizerInGameVoiceEngine(context, controlsRepository, micArbiter)
     }
 
     /** Resumable GabAI sessions and game screenshots. */

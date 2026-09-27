@@ -30,9 +30,11 @@ import com.pwde.app.play.GameCommand
 import com.pwde.app.play.GameInput
 import com.pwde.app.play.LivePlay
 import com.pwde.app.play.LivePlayState
+import com.pwde.app.play.OverlayMode
 import com.pwde.app.play.ScrollDirection
 import com.pwde.app.play.hasJoystickConfig
 import com.pwde.app.play.navigationMode
+import com.pwde.app.play.overlayMode
 import com.pwde.app.sensors.face.FaceState
 import com.pwde.app.sensors.face.JoystickDirection
 import com.pwde.app.sensors.face.TrackingStatus
@@ -45,13 +47,18 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * The "PWDe" entry in Android Settings → Accessibility (its switch reads "Use PWDe"). While a live
- * session runs over the real game ([LivePlay]), it draws the head pointer and the mode bubble over
- * any app and performs the session's screen actions: taps on mapped buttons, select, touch & hold,
- * scroll and drag at the pointer, and Back / Home / Recents / Notifications / All apps. It never
- * reads what's on screen.
+ * The "PWDe" entry in Android Settings → Accessibility (its switch reads "Use PWDe"). It owns
+ * PWDe's **one** overlay: the head pointer, the mode bubble and the speech caption. Whichever of two
+ * things is driving it — a live session over the real game ([LivePlay]) or one of PWDe's own screens
+ * that claimed it ([LivePlay.acquireOverlay]) — it draws over any app and performs screen actions:
+ * taps on mapped buttons, select, touch & hold, scroll and drag at the pointer, and Back / Home /
+ * Recents / Notifications / All apps. It never reads what's on screen.
+ *
+ * It is a system singleton, so there is no second instance to create: "starting the overlay" is only
+ * ever [LivePlay.acquireOverlay]. That is what keeps a screen's own preview from fighting it.
  */
 class PwdeAccessibilityService : AccessibilityService() {
+    private val container get() = (application as PwdeApplication).container
     private var scope: CoroutineScope? = null
     private val windowManager by lazy { getSystemService(WindowManager::class.java) }
     private var cursorView: CursorOverlayView? = null
@@ -86,7 +93,21 @@ class PwdeAccessibilityService : AccessibilityService() {
         scope?.cancel()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).also { s ->
             s.launch { livePlay.actions.collect { perform(it, livePlay) } }
-            s.launch { livePlay.state.collect { render(it, livePlay) } }
+            // One overlay, whose behaviour comes from what is actually running: a session over the
+            // real game, or a PWDe screen that claimed it. This is the only place [render] is driven,
+            // so the two can never both have a half-built overlay of their own.
+            // The calibration state is a trigger as much as data: entering or leaving a calibration
+            // screen must re-render at once, so the pointer is confined (or gone) the moment the box
+            // appears, rather than waiting for the next tracking frame. [renderCursor] reads the value.
+            s.launch {
+                combine(
+                    livePlay.state,
+                    livePlay.overlayHolders,
+                    container.pwdeVisibility.inForeground,
+                    container.calibrationOverlay.overlay,
+                ) { state, holders, inFront, _ -> Triple(state, holders.isNotEmpty(), inFront) }
+                    .collect { (state, inApp, inFront) -> render(state, inApp, inFront, livePlay) }
+            }
             s.launch {
                 faceTracking.state.collect { face ->
                     if (!livePlay.state.value.active) {
@@ -96,14 +117,14 @@ class PwdeAccessibilityService : AccessibilityService() {
             }
             s.launch {
                 faceTracking.gestureEvents.collect { gesture ->
-                    if (!livePlay.state.value.active) handleIdleGesture(gesture, livePlay, faceTracking, container.controlsRepository)
+                    // Only while the overlay is actually up. A gesture must never fire a tap on a screen
+                    // with no visible pointer to aim it — that is the same rule that keeps the overlay
+                    // from being left drawn over another app.
+                    if (drawnMode == OverlayMode.IN_APP) handleIdleGesture(gesture, livePlay, faceTracking, container.controlsRepository)
                 }
             }
             val overlayPrefs = (application as PwdeApplication).container.buttonOverlayPrefs
             s.launch { combine(livePlay.state, overlayPrefs.overlay, ::Pair).collect { (state, overlay) -> renderMarkers(state, overlay) } }
-            // Entering or leaving a calibration screen re-renders at once, rather than waiting for
-            // the next tracking frame, so the pointer is confined (or gone) the moment the box appears.
-            s.launch { container.calibrationOverlay.overlay.collect { render(livePlay.state.value, livePlay) } }
         }
     }
 
@@ -126,15 +147,32 @@ class PwdeAccessibilityService : AccessibilityService() {
 
     // ---- Overlays ----
 
-    private fun render(state: LivePlayState, livePlay: LivePlay) {
-        if (!state.active) {
-            gestures.cancelAll()
-            renderIdleCursor(
-                (application as PwdeApplication).container.faceTrackingManager.state.value,
-                livePlay,
-            )
-            return
+    /** The mode [render] last drew. Read by gesture handling so the two can never disagree. */
+    private var drawnMode = OverlayMode.OFF
+
+    /**
+     * The one overlay, drawn from [LivePlayState.overlayMode]. The two branches below are its two
+     * behaviours. Nothing here ever builds a second overlay, and every view is reused across a change
+     * of mode (`?: create…`), so a screen opening or closing cannot make the overlay flicker or
+     * double up.
+     */
+    private fun render(state: LivePlayState, inApp: Boolean, pwdeInForeground: Boolean, livePlay: LivePlay) {
+        drawnMode = state.overlayMode(inApp, pwdeInForeground)
+        when (drawnMode) {
+            OverlayMode.OFF -> {
+                gestures.cancelAll()
+                removeOverlays()
+            }
+            OverlayMode.IN_APP -> renderInApp(state, livePlay)
+            OverlayMode.GAME -> renderGame(state, livePlay)
         }
+    }
+
+    /**
+     * Over the real game: the head steers the game's movement stick and its own pointer, and voice is
+     * the in-game sherpa-onnx engine, whose label the session publishes.
+     */
+    private fun renderGame(state: LivePlayState, livePlay: LivePlay) {
         val face = state.face
         val gameMode = state.navigationMode() == NavigationMode.GAME
         val overlayOpacity = if (gameMode) GAME_MODE_OVERLAY_OPACITY else 1f
@@ -173,11 +211,16 @@ class PwdeAccessibilityService : AccessibilityService() {
                 tapEnabled = !gameMode || state.paused,
                 opacity = overlayOpacity,
                 disabledActionHint = if (gameMode && !state.paused) "Tap disabled in game mode" else null,
+                locked = state.centerLocked,
             )
             val heard = state.heard
+            val mode = buildString {
+                append(state.navigationMode().label).append(" mode")
+                if (state.centerLocked) append(" · centre locked")
+            }
             (captionView ?: createCaption())?.update(
                 state.voiceModel,
-                "${state.navigationMode().label} mode",
+                mode,
                 heard?.text,
                 heard?.matched == true,
                 heard?.seq ?: 0,
@@ -186,22 +229,45 @@ class PwdeAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun renderIdleCursor(face: FaceState, livePlay: LivePlay) {
-        removeView(captionView)
-        captionView = null
+    /**
+     * PWDe is on screen and one of its own screens claimed the overlay. Same views as over a game, so
+     * the user learns one pointer; different behaviour, because there is no game to press:
+     *
+     * - no movement stick is held (nothing to steer), so nothing is left down on the screen;
+     * - the caption reports the **app-wide** recognizer (Android `SpeechRecognizer`, i.e. Google),
+     *   which is the only thing listening while PWDe is in front — not the in-game sherpa spotter;
+     * - gestures still fire their commands: [handleIdleGesture] hands them to `perform`, which is the
+     *   whole point of using this overlay rather than a drawing that cannot press anything.
+     */
+    private fun renderInApp(state: LivePlayState, livePlay: LivePlay) {
+        gestures.cancelAll()
+        val face = state.face
+        val joystick = face.outputMode == FaceOutputMode.JOYSTICK
         (bubbleView ?: createBubble(livePlay))?.update(
-            if (face.outputMode == FaceOutputMode.JOYSTICK) "Joystick" else "Cursor",
-            paused = false,
+            if (joystick) "Joystick" else "Cursor",
+            paused = state.paused,
             tapEnabled = false,
             longPressEnabled = false,
             disabledActionHint = "No game session",
+            locked = state.centerLocked,
         )
-        if (face.status == TrackingStatus.Idle || face.outputMode == FaceOutputMode.JOYSTICK) {
+        if (face.status == TrackingStatus.Idle || joystick) {
             removeView(cursorView)
             cursorView = null
-            return
+        } else {
+            renderCursor(face, active = face.hasFace && !state.paused, dragging = false)
         }
-        renderCursor(face, active = face.hasFace, dragging = false)
+        // Read, not collect: collecting the app-wide manager's state would start its recognizer and
+        // break its "only listens while PWDe is on screen" guarantee. Every tracking frame re-renders
+        // this, which is exactly when that manager may be listening, so the caption stays current.
+        val voice = container.voiceCommandManager.state.value
+        (captionView ?: createCaption())?.update(
+            container.voiceCommandManager.modelLabel.substringBefore(" ·"),
+            "${state.navigationMode().label} mode",
+            voice.lastTranscript,
+            voice.lastCommand != null,
+            seq = voice.lastTranscript?.hashCode() ?: 0,
+        )
     }
 
     private suspend fun handleIdleGesture(
@@ -220,7 +286,9 @@ class PwdeAccessibilityService : AccessibilityService() {
         }
         when (command) {
             GameCommand.Recenter -> faceTracking.recenterCursor()
-            GameCommand.Pause, GameCommand.Resume, GameCommand.TogglePause -> Unit
+            // No session means no joystick to brake, so the lock is simply not applicable here.
+            GameCommand.Pause, GameCommand.Resume, GameCommand.TogglePause,
+            GameCommand.ToggleCenterLock, is GameCommand.CenterLock -> Unit
             else -> perform(command, livePlay)
         }
     }
@@ -427,7 +495,10 @@ class PwdeAccessibilityService : AccessibilityService() {
     private fun steerStick(state: LivePlayState) {
         val face = state.face
         val movement = state.buttons.firstOrNull { it.trigger?.type == TriggerType.MOVEMENT }
-        val holding = movement != null && face.outputMode == FaceOutputMode.JOYSTICK && face.hasFace && !state.paused
+        // A locked centre is the brake: taking the release path lifts the game's movement finger, so
+        // the character stops and stays stopped however the head (or the phone) moves.
+        val holding = movement != null && face.outputMode == FaceOutputMode.JOYSTICK && face.hasFace &&
+            !state.paused && !state.centerLocked
         if (!holding) {
             releaseStick()
             return

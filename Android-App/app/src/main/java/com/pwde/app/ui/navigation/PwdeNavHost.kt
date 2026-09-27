@@ -20,6 +20,7 @@ import com.pwde.app.data.model.Game
 import com.pwde.app.data.model.GestureAction
 import com.pwde.app.play.PlayService
 import com.pwde.app.ui.common.pwdeViewModel
+import com.pwde.app.ui.components.InAppOverlay
 import com.pwde.app.ui.components.LocalCalibrationOverlay
 import com.pwde.app.ui.components.MainTab
 import com.pwde.app.ui.controls.ChooseGestureScreen
@@ -142,8 +143,14 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
         else navController.navigate(Routes.setup())
     }
 
+    // PWDe uses its own overlay everywhere inside the app, so the pointer the user learns on the
+    // Dashboard is the same one that presses buttons over the game — never a second, private cursor.
+    // One claim for the whole app; the accessibility service is a singleton, so nothing is created.
+    InAppOverlay("pwde-app")
+
     CompositionLocalProvider(
         LocalVoiceController provides voice,
+        // The same overlay is what a calibration screen confines or hides while it is open.
         LocalCalibrationOverlay provides (activity?.application as? PwdeApplication)?.container?.calibrationOverlay,
     ) {
     NavHost(navController, startDestination = Routes.SPLASH) {
@@ -262,13 +269,16 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
         ) { entry ->
             val game = Game.byId(entry.arguments?.getString("gameId"))
             val profileId = entry.arguments?.getLong("profile")?.takeIf { it >= 0 }
-            // The preview needs the camera and in-game voice, so a live session over the real game ends.
+            // The preview needs the camera and voice, so a live session over the real game ends.
+            // Voice here is the app-wide recognizer (Google): PWDe is on screen, so the in-game
+            // sherpa-onnx spotter — built for hearing phrases over the game's own audio — is not
+            // what should be listening. A session over the real game still gets that one.
             val context = LocalContext.current
             LaunchedEffect(Unit) { PlayService.stop(context) }
             PlayingScreen(
                 viewModel = pwdeViewModel {
                     GameplayViewModel(
-                        it.faceTrackingManager, it.inGameVoiceEngine, it.controlsRepository, it.profileRepository,
+                        it.faceTrackingManager, it.inAppVoiceEngine, it.controlsRepository, it.profileRepository,
                         it.settingsRepository, it.gabAiRepository, game, profileId, it.livePlay,
                     )
                 },
@@ -350,8 +360,10 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
                     GabAiViewModel(
                         it.gabAiRepository, it.profileRepository, it.controlsRepository, it.settingsRepository,
                         it.voiceCommandManager, it.faceTrackingManager, start, it.hudDetector,
-                        buttonSpeechModel = it.inGameVoiceEngine.modelLabel,
-                        inGameVoice = it.inGameVoiceEngine,
+                        // GabAI runs with PWDe on screen, so "test the buttons" presses them with the
+                        // app-wide recognizer the user is already speaking to, not the in-game spotter.
+                        buttonSpeechModel = it.inAppVoiceEngine.modelLabel,
+                        inGameVoice = it.inAppVoiceEngine,
                         livePlay = it.livePlay,
                     )
                 },

@@ -39,6 +39,11 @@ data class LivePlayState(
      * mode. Not saved: a new session starts from the input mode again.
      */
     val navigationOverride: NavigationMode? = null,
+    /**
+     * The movement stick is braked: it stays at its centre, whichever way the head or phone points,
+     * until the user unlocks it. Not saved — a mid-match brake is not a preference.
+     */
+    val centerLocked: Boolean = false,
 )
 
 /**
@@ -54,6 +59,25 @@ data class Heard(val text: String, val matched: Boolean, val seq: Int)
 class LivePlay {
     private val _state = MutableStateFlow(LivePlayState())
     val state: StateFlow<LivePlayState> = _state.asStateFlow()
+
+    /**
+     * The PWDe screens asking for the overlay right now, by name.
+     *
+     * A **reference count, not a flag**: a wizard step and the preview behind it may both want the
+     * overlay and there must still be exactly one. Mutated with `update {}` so a read-modify-write
+     * cannot drop a holder (that exact bug once left the camera closed in the eye-tracking work).
+     *
+     * The overlay itself is the accessibility service's, a system singleton: acquiring it never
+     * creates anything, it only says who is using it.
+     */
+    private val _overlayHolders = MutableStateFlow<Set<String>>(emptySet())
+    val overlayHolders: StateFlow<Set<String>> = _overlayHolders.asStateFlow()
+
+    /** Ask for the one overlay on [name]'s behalf. Balanced by [releaseOverlay]. */
+    fun acquireOverlay(name: String) = _overlayHolders.update { it + name }
+
+    /** Release [name]'s claim. A name that never claimed is a no-op. */
+    fun releaseOverlay(name: String) = _overlayHolders.update { it - name }
 
     private val _actions = MutableSharedFlow<GameCommand>(extraBufferCapacity = 16)
 
@@ -72,13 +96,55 @@ class LivePlay {
 
     internal fun update(transform: (LivePlayState) -> LivePlayState) = _state.update(transform)
 
+    /**
+     * Publish a command for the accessibility service to carry out on the real screen. Used by a
+     * running session *and* by PWDe's own screens, so the in-app preview drives the same overlay,
+     * with the same coordinates and the same tap logic, as a session over the real game.
+     */
     internal fun perform(command: GameCommand) {
         _actions.tryEmit(command)
     }
 
     internal fun end() {
+        // Deliberately not clearing [overlayHolders]: a screen showing PWDe is still using the
+        // overlay after the session over a game ends. Only the screen that claimed it may release it.
         _state.value = LivePlayState()
     }
+}
+
+/**
+ * What the one overlay is driving. There is exactly **one** overlay — the accessibility service's
+ * views — and this says what it does, instead of a second, private copy being built per screen.
+ */
+enum class OverlayMode {
+    /** Nobody is using it: no views are shown at all. */
+    OFF,
+
+    /**
+     * PWDe is on screen and one of its own flows wants the pointer, so the overlay drives PWDe.
+     * Voice is the app-wide recognizer (`AndroidVoiceCommandManager`, Google), which is the only
+     * thing listening while PWDe is in front.
+     */
+    IN_APP,
+
+    /**
+     * A live session runs over the real game: the overlay presses the game's buttons. Voice there is
+     * the in-game engine (sherpa-onnx), which holds the mic for the whole session.
+     */
+    GAME,
+}
+
+/**
+ * The overlay's behaviour, from what is actually running. [inApp] is true while at least one PWDe
+ * screen holds a claim; [pwdeInForeground] is true while the user is actually in the PWDe app.
+ *
+ * A running session always wins: the overlay must never be half in-app while it is pressing the
+ * game's buttons. Pure, so the rule is unit-tested rather than inferred from three flows in the UI.
+ */
+fun LivePlayState.overlayMode(inApp: Boolean, pwdeInForeground: Boolean): OverlayMode = when {
+    active -> OverlayMode.GAME
+    inApp && pwdeInForeground -> OverlayMode.IN_APP
+    else -> OverlayMode.OFF
 }
 
 /** True if a game session is active and the currently opened app has a joystick configuration. */

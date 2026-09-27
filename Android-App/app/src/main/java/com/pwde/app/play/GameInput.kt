@@ -1,6 +1,7 @@
 package com.pwde.app.play
 
 import com.pwde.app.data.model.ControlConfig
+import com.pwde.app.data.model.FaceOutputMode
 import com.pwde.app.data.model.FacialGesture
 import com.pwde.app.data.model.GestureAction
 import com.pwde.app.data.model.MappedButton
@@ -18,6 +19,18 @@ sealed interface GameCommand {
     object Resume : GameCommand
     object TogglePause : GameCommand
     object Recenter : GameCommand
+    /** Flip the center lock: hold the movement stick at the middle until this is asked for again. */
+    object ToggleCenterLock : GameCommand
+    /**
+     * Explicitly lock ([locked] = true) or unlock the center. The shape for speech, which names the
+     * state rather than toggling.
+     *
+     * **Currently has no phrase**: the centre lock is a gesture (`GestureAction.LOCK_CENTER`) only,
+     * because the in-game spotter's keyword list cannot afford the phrases — see the note in
+     * [STANDARD_BINDINGS]. Re-add a binding there and this becomes reachable again; the handling in the
+     * live session, the preview and the accessibility service is already in place.
+     */
+    data class CenterLock(val locked: Boolean) : GameCommand
     object Back : GameCommand
     object Home : GameCommand
     object Notifications : GameCommand
@@ -70,6 +83,11 @@ object GameInput {
     const val EXIT = "game_exit"
     const val SELECT = "game_select"
     const val RECENTER = "game_recenter"
+
+    /** Speech ids for the center lock. Kept for a future explicit phrase; no binding uses them yet. */
+    const val LOCK_CENTER = "game_lock_center"
+    const val UNLOCK_CENTER = "game_unlock_center"
+
     const val HIDE_OVERLAY = "game_hide_overlay"
     const val SHOW_OVERLAY = "game_show_overlay"
     const val SHOW_CONTROLS = "game_show_controls"
@@ -115,6 +133,12 @@ object GameInput {
         VoiceCommandBinding(EXIT, listOf("exit game", "quit game", "exit to pwde", "stop pwde")),
         VoiceCommandBinding(SELECT, listOf("select", "tap", "click")),
         VoiceCommandBinding(RECENTER, listOf("recenter", "center", "recenter joystick", "center joystick")),
+        // The centre lock is a GESTURE (GestureAction.LOCK_CENTER -> ToggleCenterLock) and deliberately
+        // has no phrase here. The in-game engine is sherpa-onnx keyword spotting over ONE flat list of
+        // ~60 phrases sharing `maxActivePaths` search paths, and phrases are matched on sound: "lock
+        // joystick"/"unlock joystick"/"lock center" competed directly with "joystick mode", "gyro
+        // joystick" and "center joystick", which then stopped firing. Verified on device by reading
+        // files/models/…/keywords-game.txt (60+ lines, every one `:6.0 #0.0`). Keep this list lean.
         VoiceCommandBinding(HIDE_OVERLAY, listOf("hide overlay", "hide panel", "close overlay")),
         VoiceCommandBinding(SHOW_OVERLAY, listOf("show overlay", "show panel", "open overlay")),
         VoiceCommandBinding(SHOW_CONTROLS, SHOW_CONTROLS_PHRASES),
@@ -151,6 +175,8 @@ object GameInput {
         MENU, EXIT -> GameCommand.Exit
         SELECT -> GameCommand.Select
         RECENTER -> GameCommand.Recenter
+        LOCK_CENTER -> GameCommand.CenterLock(true)
+        UNLOCK_CENTER -> GameCommand.CenterLock(false)
         HIDE_OVERLAY -> GameCommand.HideOverlay
         SHOW_OVERLAY -> GameCommand.ShowOverlay
         SHOW_CONTROLS -> GameCommand.ShowControls
@@ -173,17 +199,24 @@ object GameInput {
     /** A game button mapped to this gesture wins over the general gesture actions. */
     fun fromGesture(gesture: FacialGesture, buttons: List<MappedButton>, config: ControlConfig): GameCommand {
         buttonFor(buttons, TriggerType.GESTURE, gesture.name)?.let { return GameCommand.Press(it) }
-        return when (config.actionFor(gesture)) {
-            null -> GameCommand.Ignored("${gesture.label} — no action assigned")
-            GestureAction.SELECT -> GameCommand.Select
-            GestureAction.PAUSE_RESUME -> GameCommand.TogglePause
-            GestureAction.RECENTER -> GameCommand.Recenter
-            GestureAction.BACK -> GameCommand.Back
-            GestureAction.HOME -> GameCommand.Home
-            GestureAction.NOTIFICATIONS -> GameCommand.Notifications
-            GestureAction.ALL_APPS -> GameCommand.AllApps
-            GestureAction.TOUCH_HOLD -> GameCommand.TouchHold
-        }
+        return config.actionFor(gesture)?.let(::commandFor)
+            ?: GameCommand.Ignored("${gesture.label} — no action assigned")
+    }
+
+    /**
+     * The one mapping from a [GestureAction] to the [GameCommand] it runs. No `else`, so a new action
+     * asks to be given a command instead of silently doing nothing.
+     */
+    fun commandFor(action: GestureAction): GameCommand = when (action) {
+        GestureAction.SELECT -> GameCommand.Select
+        GestureAction.PAUSE_RESUME -> GameCommand.TogglePause
+        GestureAction.RECENTER -> GameCommand.Recenter
+        GestureAction.LOCK_CENTER -> GameCommand.ToggleCenterLock
+        GestureAction.BACK -> GameCommand.Back
+        GestureAction.HOME -> GameCommand.Home
+        GestureAction.NOTIFICATIONS -> GameCommand.Notifications
+        GestureAction.ALL_APPS -> GameCommand.AllApps
+        GestureAction.TOUCH_HOLD -> GameCommand.TouchHold
     }
 
     /** The head joystick settled on [direction]; null when no button is mapped to it. */
@@ -206,6 +239,7 @@ object GameInput {
     /** While paused only commands that control PWDe itself still work. */
     fun worksWhilePaused(command: GameCommand): Boolean = when (command) {
         GameCommand.Pause, GameCommand.Resume, GameCommand.TogglePause, GameCommand.Recenter, GameCommand.Exit,
+        GameCommand.ToggleCenterLock, is GameCommand.CenterLock,
         GameCommand.HideOverlay, GameCommand.ShowOverlay, GameCommand.ShowControls, GameCommand.HideControls, GameCommand.CursorMode, GameCommand.JoystickMode,
         GameCommand.GyroMode, GameCommand.HeadTracking,
         GameCommand.GameMode, GameCommand.NavigationMode,
@@ -215,6 +249,15 @@ object GameInput {
 
     /** True for the commands that steer the phone rather than the game. */
     fun isNavigationCommand(command: GameCommand): Boolean = command in NAVIGATION_COMMANDS
+
+    /**
+     * Why the center lock is refused in [outputMode], or null when it may run. The lock brakes the
+     * movement stick, so it only means anything where there is one: a cursor has nothing to hold still.
+     * Centering is NOT phone navigation, so game mode never refuses it — only the mode without a stick.
+     */
+    fun centerLockRefusal(outputMode: FaceOutputMode): String? =
+        if (outputMode == FaceOutputMode.JOYSTICK) null
+        else "Locking the centre needs a joystick — say \"joystick mode\" for it"
 
     /**
      * Why [command] is refused in [mode], or null when it may run. Game mode keeps the phone's own

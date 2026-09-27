@@ -1,6 +1,7 @@
 package com.pwde.app.ui.common
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -20,3 +21,8 @@ inline fun <reified VM : ViewModel> pwdeViewModel(
         initializer { create((this[APPLICATION_KEY] as PwdeApplication).container) }
     },
 )
+
+/** The app's singletons, for the few composables that drive one directly (the overlay claim). */
+@Composable
+fun pwdeContainer(): AppContainer =
+    (LocalContext.current.applicationContext as PwdeApplication).container

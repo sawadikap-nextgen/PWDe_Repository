@@ -121,25 +121,62 @@ class InGameVoiceEngineTest {
     }
 
     @Test
-    fun micArbiterHandsTheMicToTheGameAndBack() {
+    fun micArbiterHandsTheMicToTheGameAndBack() = runTest {
         val arbiter = MicArbiter()
-        assertFalse(arbiter.gameHasMic.value)
-        arbiter.takeForGame()
-        assertTrue(arbiter.gameHasMic.value)
-        arbiter.releaseFromGame()
-        assertFalse(arbiter.gameHasMic.value)
+        val holder = MicArbiter.newHolder("test")
+        assertFalse(arbiter.gameHasMic.first())
+        arbiter.takeForGame(holder)
+        assertTrue(arbiter.gameHasMic.first())
+        arbiter.releaseFromGame(holder)
+        assertFalse(arbiter.gameHasMic.first())
+    }
+
+    /**
+     * PWDe has more than one engine in the game slot (the app recognizer for PWDe's own screens, the
+     * sherpa spotter over the real game). With a single boolean the first release cleared the slot
+     * while the other was still recording, letting the app-wide recognizer start on top of it — two
+     * `AudioRecord`s then fight for the microphone and the loser hears silence, so the spotter goes
+     * deaf and in-game commands stop firing.
+     */
+    @Test
+    fun oneEngineReleasingLeavesTheMicWithTheOneStillHoldingIt() = runTest {
+        val arbiter = MicArbiter()
+        val inApp = MicArbiter.newHolder("platform")
+        val overGame = MicArbiter.newHolder("sherpa")
+        arbiter.takeForGame(inApp)
+        arbiter.takeForGame(overGame)
+        arbiter.releaseFromGame(inApp)
+        assertTrue("the engine over the real game is still recording", arbiter.busy.first())
+        arbiter.releaseFromGame(overGame)
+        assertFalse(arbiter.busy.first())
+    }
+
+    /** Holder names are per instance, so two engines can never be handed the same one. */
+    @Test
+    fun everyEngineGetsItsOwnHolderName() {
+        assertFalse(MicArbiter.newHolder("sherpa") == MicArbiter.newHolder("sherpa"))
+    }
+
+    /** Releasing a name that never took it must not free somebody else's claim. */
+    @Test
+    fun releasingAnUnknownHolderChangesNothing() = runTest {
+        val arbiter = MicArbiter()
+        arbiter.takeForGame(MicArbiter.newHolder("sherpa"))
+        arbiter.releaseFromGame(MicArbiter.newHolder("platform"))
+        assertTrue(arbiter.busy.first())
     }
 
     @Test
     fun micArbiterIsBusyWhileTheGameOrTheWakeWordHasTheMic() = runTest {
         val arbiter = MicArbiter()
+        val holder = MicArbiter.newHolder("sherpa")
         assertFalse(arbiter.busy.first())
         arbiter.takeForWakeWord()
         assertTrue(arbiter.busy.first())
-        arbiter.takeForGame()
+        arbiter.takeForGame(holder)
         arbiter.releaseFromWakeWord()
         assertTrue(arbiter.busy.first())
-        arbiter.releaseFromGame()
+        arbiter.releaseFromGame(holder)
         assertFalse(arbiter.busy.first())
     }
 }
