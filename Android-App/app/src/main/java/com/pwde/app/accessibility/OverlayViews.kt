@@ -109,6 +109,7 @@ class ModeBubbleView(
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var label = "Cursor"
     private var paused = false
+    private var locked = false
     private var tapEnabled = true
     private var longPressEnabled = true
     private var disabledActionHint: String? = null
@@ -133,12 +134,14 @@ class ModeBubbleView(
         opacity: Float = 1f,
         longPressEnabled: Boolean = true,
         disabledActionHint: String? = null,
+        locked: Boolean = false,
     ) {
-        if (this.label == label && this.paused == paused && this.tapEnabled == tapEnabled &&
+        if (this.label == label && this.paused == paused && this.locked == locked && this.tapEnabled == tapEnabled &&
             this.longPressEnabled == longPressEnabled && this.disabledActionHint == disabledActionHint && alpha == opacity
         ) return
         this.label = label
         this.paused = paused
+        this.locked = locked
         this.tapEnabled = tapEnabled
         this.longPressEnabled = longPressEnabled
         this.disabledActionHint = disabledActionHint
@@ -154,7 +157,8 @@ class ModeBubbleView(
             else -> "Tap to pause"
         }
         val longPressHint = if (longPressEnabled) "long-press to switch mode" else "mode switching unavailable"
-        contentDescription = "PWDe, $label mode${if (paused) ", paused" else ""}. $tapHint, $longPressHint."
+        contentDescription = "PWDe, $label mode" + (if (paused) ", paused" else "") +
+            (if (locked) ", centre locked" else "") + ". $tapHint, $longPressHint."
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) = setMeasuredDimension(size, size)
@@ -162,10 +166,10 @@ class ModeBubbleView(
     override fun onDraw(canvas: Canvas) {
         val r = size / 2f
         canvas.drawCircle(r, r, r - 2 * density, background)
-        border.color = if (paused) WARNING else PRIMARY
+        border.color = if (paused || locked) WARNING else PRIMARY
         canvas.drawCircle(r, r, r - 3 * density, border)
         val baseline = r - (text.descent() + text.ascent()) / 2
-        canvas.drawText(if (paused) "Paused" else label, r, baseline, text)
+        canvas.drawText(if (paused) "Paused" else if (locked) "Locked" else label, r, baseline, text)
     }
 
     // Tap and long-press also come through performClick/performLongClick for TalkBack and switch users.

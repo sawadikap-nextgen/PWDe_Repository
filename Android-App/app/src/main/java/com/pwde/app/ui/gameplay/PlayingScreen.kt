@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ExitToApp
 import androidx.compose.material.icons.outlined.Face
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.Pause
@@ -78,6 +79,7 @@ import com.pwde.app.sensors.face.FaceState
 import com.pwde.app.sensors.face.TrackingStatus
 import com.pwde.app.ui.components.ButtonStyle
 import com.pwde.app.ui.components.DemoModeBanner
+import com.pwde.app.ui.components.overlayDrawsPointer
 import com.pwde.app.ui.components.ControlsList
 import com.pwde.app.ui.components.JoystickView
 import com.pwde.app.ui.components.LockOrientation
@@ -105,6 +107,11 @@ fun PlayingScreen(viewModel: GameplayViewModel, onExit: () -> Unit) {
     val overlayHidden by viewModel.overlayHidden.collectAsStateWithLifecycle()
     val controlsShown by viewModel.controlsShown.collectAsStateWithLifecycle()
     val navigationMode by viewModel.navigationMode.collectAsStateWithLifecycle()
+    val centerLocked by viewModel.centerLocked.collectAsStateWithLifecycle()
+    // The preview uses PWDe's one overlay for the pointer, exactly as it is over the real game — the
+    // app-wide claim is made by PwdeNavHost. It only falls back to drawing its own when the
+    // accessibility service is off, so there is never a second cursor that cannot press anything.
+    val overlayDrawn = overlayDrawsPointer()
     val requestCamera = rememberCameraPermissionRequest { viewModel.onCameraPermissionResult() }
     val colors = PwdeTheme.colors
     BackHandler(onBack = onExit)
@@ -131,9 +138,9 @@ fun PlayingScreen(viewModel: GameplayViewModel, onExit: () -> Unit) {
         val hasMovementStick = ui.buttons.any { it.trigger?.type == TriggerType.MOVEMENT }
         ProfileButtons(ui.buttons, lastEvent, shot, stick = face.joystick.takeIf { joystickMode }, stickActive = active)
         val screenWidth = maxWidth
-        if (!joystickMode) {
+        if (!joystickMode && !overlayDrawn) {
             CursorLayer(face, active, lastEvent)
-        } else if (shot == null) {
+        } else if (joystickMode && shot == null) {
             // Only the plain simulated arena gets a character to walk around.
             SimulatedAvatar(face, active)
         }
@@ -161,6 +168,15 @@ fun PlayingScreen(viewModel: GameplayViewModel, onExit: () -> Unit) {
                 StatusPill("Calibration: $it", modifier = Modifier.background(colors.background.copy(alpha = 0.8f), PwdeShapes.pill))
             }
             if (!overlayHidden) DemoModeBanner(face, Modifier.background(colors.background.copy(alpha = 0.85f), PwdeShapes.button))
+            if (!overlayHidden && !overlayDrawn) {
+                // Honest about it: the pointer is drawn by the overlay, and without "Use PWDe" on there
+                // is nothing to carry a press out. A silent, dead pointer is the bug this screen had.
+                StatusPill(
+                    "Turn on \"Use PWDe\" in Android Settings to press things on screen",
+                    color = colors.warning,
+                    modifier = Modifier.background(colors.background.copy(alpha = 0.85f), PwdeShapes.pill),
+                )
+            }
             if (!overlayHidden && face.isSimulated && viewModel.canRequestCamera) {
                 PwdeButton("Turn on camera", requestCamera, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.Videocam)
             }
@@ -176,7 +192,7 @@ fun PlayingScreen(viewModel: GameplayViewModel, onExit: () -> Unit) {
             if (controlsShown) ControlsList(ui.buttons, onClose = { viewModel.setControlsShown(false) })
             if (!overlayHidden) {
                 if (voice.usesTextFallback) GameCommandField(voice.availability.label, viewModel::submitText)
-                OverlayPanel(face, navigationMode, voiceLine(voice), lastEvent, paused, viewModel::togglePause, onExit)
+                OverlayPanel(face, navigationMode, voiceLine(voice), lastEvent, paused, centerLocked, viewModel::togglePause, onExit)
             }
         }
     }
@@ -366,6 +382,7 @@ private fun OverlayPanel(
     voiceText: String,
     lastEvent: OverlayEvent?,
     paused: Boolean,
+    centerLocked: Boolean,
     onTogglePause: () -> Unit,
     onExit: () -> Unit,
 ) {
@@ -400,6 +417,14 @@ private fun OverlayPanel(
                 },
                 color = if (paused || face.status != TrackingStatus.Live) colors.warning else colors.primary,
                 icon = Icons.Outlined.Face,
+            )
+        }
+        if (centerLocked) {
+            StatusPill(
+                "Centre locked — repeat the gesture to steer",
+                color = colors.warning,
+                icon = Icons.Outlined.Lock,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
         Column(Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {

@@ -80,6 +80,7 @@ import com.pwde.app.sensors.face.JoystickDirection
 import com.pwde.app.ui.components.ButtonStyle
 import com.pwde.app.ui.components.ControlsList
 import com.pwde.app.ui.components.DemoModeBanner
+import com.pwde.app.ui.components.overlayDrawsPointer
 import com.pwde.app.ui.components.GradientCard
 import com.pwde.app.ui.components.InfoNote
 import com.pwde.app.ui.components.OptionCard
@@ -224,6 +225,9 @@ internal fun ButtonMappingStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     val face by viewModel.faceState.collectAsStateWithLifecycle()
     val buttons = ui.form.buttons
     val selected = buttons.firstOrNull { it.id == ui.selectedButtonId }
+    // The stage uses PWDe's one overlay for the pointer, so "point and say place" points with the
+    // same cursor — which can press things — as the game. Only draw our own when the service is off.
+    val overlayDrawn = overlayDrawsPointer()
     VoiceCommandsEffect(MAPPING_COMMANDS) { id ->
         when (id) {
             "place" -> viewModel.addButtonAtPointer()
@@ -259,7 +263,7 @@ internal fun ButtonMappingStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
                 screenshot = ui.screenshot,
                 buttons = buttons,
                 selectedId = ui.selectedButtonId,
-                pointer = if (face.hasFace) Offset(face.cursor.x, face.cursor.y) else null,
+                pointer = if (!overlayDrawn && face.hasFace) Offset(face.cursor.x, face.cursor.y) else null,
                 fit = true,
                 onTapEmpty = viewModel::addButton,
                 onTapButton = { viewModel.selectButton(it) },

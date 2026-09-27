@@ -188,4 +188,47 @@ class GameInputTest {
         assertNotNull(GameInput.navigationRefusal(command, NavigationMode.GAME))
         assertNull(GameInput.navigationRefusal(command, NavigationMode.NAVIGATION))
     }
+
+    /**
+     * Centering is NOT phone navigation. Game mode turns off the phone's own navigation and nothing
+     * else, so neither "Center" nor "Lock center" may ever be caught by a mode gate — and a new
+     * action without a command is a compile error, so this list only grows on purpose.
+     */
+    @Test
+    fun centeringIsNeverTreatedAsPhoneNavigation() {
+        listOf(GestureAction.RECENTER, GestureAction.LOCK_CENTER).forEach { action ->
+            assertTrue("${action.label} centres", action.isCentering)
+            val command = GameInput.commandFor(action)
+            assertFalse("${action.label} is not phone navigation", GameInput.isNavigationCommand(command))
+            assertNull("${action.label} is never refused", GameInput.navigationRefusal(command, NavigationMode.GAME))
+        }
+        assertFalse(GestureAction.SELECT.isCentering)
+        assertFalse(GestureAction.BACK.isCentering)
+    }
+
+    /**
+     * A gesture toggles the brake, so the same move turns it on and off. Speech names the state
+     * outright instead: "lock center" must never *unlock* just because it was already locked.
+     */
+    @Test
+    fun theLockGestureTogglesAndSpeechNamesTheState() {
+        assertEquals(GameCommand.ToggleCenterLock, GameInput.commandFor(GestureAction.LOCK_CENTER))
+        assertEquals(GameCommand.Recenter, GameInput.commandFor(GestureAction.RECENTER))
+        assertEquals(GameCommand.ToggleCenterLock, GameInput.fromGesture(gesture, emptyList(), ControlConfig(gestureAssignments = mapOf(GestureAction.LOCK_CENTER to gesture))))
+        assertEquals(GameCommand.Recenter, GameInput.fromGesture(gesture, emptyList(), ControlConfig(gestureAssignments = mapOf(GestureAction.RECENTER to gesture))))
+        assertEquals(GameCommand.CenterLock(true), GameInput.fromVoice(GameInput.LOCK_CENTER, "lock center", buttons))
+        assertEquals(GameCommand.CenterLock(false), GameInput.fromVoice(GameInput.UNLOCK_CENTER, "unlock center", buttons))
+        assertFalse(GameInput.fromVoice(GameInput.LOCK_CENTER, "lock center", buttons) == GameInput.fromVoice(GameInput.UNLOCK_CENTER, "unlock center", buttons))
+    }
+
+    /** The brake holds the movement stick still, so it is only refused where there is no stick. */
+    @Test
+    fun theBrakeOnlyMakesSenseWithAMovementStick() {
+        assertNull(GameInput.centerLockRefusal(FaceOutputMode.JOYSTICK))
+        assertNotNull(GameInput.centerLockRefusal(FaceOutputMode.CURSOR))
+        assertTrue(GameInput.worksWhilePaused(GameCommand.ToggleCenterLock))
+        assertTrue(GameInput.worksWhilePaused(GameCommand.CenterLock(true)))
+        assertFalse(GameInput.needsPointer(GameCommand.ToggleCenterLock))
+        assertFalse(GameInput.needsPointer(GameCommand.CenterLock(true)))
+    }
 }

@@ -76,6 +76,7 @@ import com.pwde.app.data.prefs.TextSizeOption
 import com.pwde.app.ui.components.ButtonStyle
 import com.pwde.app.ui.components.CameraFeed
 import com.pwde.app.ui.components.DemoModeBanner
+import com.pwde.app.ui.components.overlayDrawsPointer
 import com.pwde.app.ui.components.FooterActions
 import com.pwde.app.ui.components.GradientCard
 import com.pwde.app.ui.components.InfoNote
@@ -503,6 +504,9 @@ private fun CursorCalibrationStep(state: SetupUiState, viewModel: SetupViewModel
             "recenter" -> viewModel.recenterCursor()
         }
     }
+    // The overlay draws the pointer; the pad keeps the target ring and drops its own dot, so the user
+    // sees exactly one pointer. With "Use PWDe" off the overlay draws nothing and the pad shows the dot.
+    val overlayDrawn = overlayDrawsPointer()
     InfoNote(axisSays(axis))
     DemoModeBanner(face)
     CameraFeed(
@@ -512,7 +516,7 @@ private fun CursorCalibrationStep(state: SetupUiState, viewModel: SetupViewModel
         onCameraPermissionResult = viewModel::onCameraPermissionResult,
         modifier = Modifier.fillMaxWidth(),
         feedAspectRatio = 16f / 10f,
-        overlay = { CursorCalibrationOverlay(face.cursor.x, face.cursor.y, face.hasFace, axis) },
+        overlay = { CursorCalibrationOverlay(face.cursor.x, face.cursor.y, face.hasFace, axis, showPointer = !overlayDrawn) },
     )
     PwdeButton(
         "Recenter pointer",
@@ -534,7 +538,7 @@ private fun targetFor(axis: Axis): Offset = when (axis) {
 }
 
 @Composable
-private fun BoxScope.CursorCalibrationOverlay(x: Float, y: Float, active: Boolean, axis: Axis) {
+private fun BoxScope.CursorCalibrationOverlay(x: Float, y: Float, active: Boolean, axis: Axis, showPointer: Boolean) {
     val colors = PwdeTheme.colors
     val target = targetFor(axis)
     val onTarget = hypot(x - target.x, y - target.y) < 0.1f
@@ -548,7 +552,7 @@ private fun BoxScope.CursorCalibrationOverlay(x: Float, y: Float, active: Boolea
         val t = Offset(target.x * size.width, target.y * size.height)
         drawCircle(colors.primary.copy(alpha = if (onTarget) 0.5f else 0.2f), radius = 26.dp.toPx(), center = t)
         drawCircle(colors.primary, radius = 26.dp.toPx(), center = t, style = Stroke(3.dp.toPx()))
-        drawCircle(if (active) colors.secondary else colors.textMuted, radius = 12.dp.toPx(), center = Offset(x * size.width, y * size.height))
+        if (showPointer) drawCircle(if (active) colors.secondary else colors.textMuted, radius = 12.dp.toPx(), center = Offset(x * size.width, y * size.height))
     }
     if (onTarget) {
         StatusPill(

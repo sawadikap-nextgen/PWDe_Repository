@@ -71,6 +71,15 @@ data class InGameVoiceState(
     val level: Float = 0f,
     val lastText: String? = null,
     val lastCommandId: String? = null,
+    /**
+     * The engine that really has the microphone **right now**, short form, for the overlay caption.
+     *
+     * Only an engine that changes which recognizer is listening mid-session sets this (see
+     * [AdaptiveVoiceEngine]); every other engine leaves it null and its own [InGameVoiceEngine.modelLabel]
+     * is the truth. Without it the caption would keep naming the engine chosen when the session started,
+     * which is exactly how "it doesn't switch" looks from the outside.
+     */
+    val modelLabel: String? = null,
 ) {
     val usesTextFallback: Boolean get() = availability != MicAvailability.AVAILABLE
 }
@@ -144,6 +153,8 @@ class SpeechRecognizerInGameVoiceEngine(
     private val micArbiter: MicArbiter,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
 ) : BaseInGameVoiceEngine() {
+    /** Unique to this instance: see [MicArbiter.newHolder]. */
+    private val micHolder = MicArbiter.newHolder("platform")
     private val appContext = context.applicationContext
     private var settingsJob: Job? = null
 
@@ -160,7 +171,7 @@ class SpeechRecognizerInGameVoiceEngine(
 
     override fun start() {
         scope.launch {
-            micArbiter.takeForGame()
+            micArbiter.takeForGame(micHolder)
             recognizer.resetErrors()
             settingsJob?.cancel()
             settingsJob = launch {
@@ -185,7 +196,7 @@ class SpeechRecognizerInGameVoiceEngine(
             recognizer.stop()
             onUtteranceAborted()
             updateState { it.copy(running = false, listening = false, level = 0f) }
-            micArbiter.releaseFromGame()
+            micArbiter.releaseFromGame(micHolder)
         }
     }
 

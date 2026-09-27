@@ -56,6 +56,7 @@ import com.pwde.app.ui.components.ButtonStyle
 import com.pwde.app.ui.components.CameraFeed
 import com.pwde.app.ui.components.CursorCalibrationOverlay
 import com.pwde.app.ui.components.DemoModeBanner
+import com.pwde.app.ui.components.overlayDrawsPointer
 import com.pwde.app.ui.components.GestureMeter
 import com.pwde.app.ui.components.GradientCard
 import com.pwde.app.ui.components.IconBadge
@@ -296,6 +297,9 @@ private fun CursorAxisStep(viewModel: GabAiViewModel, ui: GabAiUiState, axis: Ax
             "recenter" -> viewModel.recenterCursor()
         }
     }
+    // The overlay draws the pointer; the pad keeps the ring and drops its own dot, so the user sees
+    // exactly one pointer. With "Use PWDe" off the overlay draws nothing and the pad shows the dot.
+    val overlayDrawn = overlayDrawsPointer()
     GabAiStep(
         viewModel, ui,
         title = "Cursor: ${axis.label}",
@@ -314,7 +318,7 @@ private fun CursorAxisStep(viewModel: GabAiViewModel, ui: GabAiUiState, axis: Ax
             modifier = Modifier.align(Alignment.CenterHorizontally).fillMaxWidth(),
             feedAspectRatio = 16f / 10f,
             overlay = {
-                CursorCalibrationOverlay(face.cursor.x, face.cursor.y, face.hasFace, targetFor(axis))
+                CursorCalibrationOverlay(face.cursor.x, face.cursor.y, face.hasFace, targetFor(axis), showPointer = !overlayDrawn)
             },
         )
         PwdeButton("Recenter pointer", viewModel::recenterCursor, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.CenterFocusStrong, modifier = Modifier.fillMaxWidth())

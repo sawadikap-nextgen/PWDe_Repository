@@ -88,6 +88,10 @@ class GameplayViewModel(
     private val _controlsShown = MutableStateFlow(false)
     val controlsShown: StateFlow<Boolean> = _controlsShown.asStateFlow()
 
+    /** The center brake for this preview, mirroring the live session's. */
+    private val _centerLocked = MutableStateFlow(false)
+    val centerLocked: StateFlow<Boolean> = _centerLocked.asStateFlow()
+
     fun setControlsShown(shown: Boolean) {
         _controlsShown.value = shown
     }
@@ -169,8 +173,10 @@ class GameplayViewModel(
         post(if (hidden) "Overlay hidden — say \"show overlay\" to bring it back" else "Overlay shown", OverlayEvent.Kind.ACTION)
     }
 
-    fun select() {
+    fun select(carryOut: Boolean = true) {
         if (_paused.value) return post("Paused — say \"resume\" first", OverlayEvent.Kind.IGNORED)
+        // Carried out through the shared overlay, at the pointer's real position on the screen.
+        if (carryOut) livePlay?.perform(GameCommand.Select)
         post("Select", OverlayEvent.Kind.SELECT)
     }
 
@@ -194,45 +200,82 @@ class GameplayViewModel(
         if (_paused.value && !GameInput.worksWhilePaused(command)) {
             return post("Paused — say \"resume\" first", OverlayEvent.Kind.IGNORED)
         }
-        execute(command)
+        execute(command, carryOut = true)
     }
 
+    /**
+     * A gesture is **already carried out by the overlay**: `PwdeAccessibilityService.handleIdleGesture`
+     * runs for every PWDe screen while no session is over the real game, which is exactly the case in
+     * the preview. So this only reports it — carrying it out here as well would press twice.
+     */
     private fun onGesture(gesture: FacialGesture) {
         val command = GameInput.fromGesture(gesture, _ui.value.buttons, config.value)
         GameInput.navigationRefusal(command, currentNavigationMode())?.let { return post(it, OverlayEvent.Kind.IGNORED) }
         if (_paused.value && !GameInput.worksWhilePaused(command)) {
             return post("${gesture.label} ignored while paused", OverlayEvent.Kind.IGNORED)
         }
-        execute(command)
+        execute(command, carryOut = false)
     }
 
     /** The mode right now: the phrase wins, otherwise the input mode decides. */
     private fun currentNavigationMode(): NavigationMode = navigationModeFor(_navigationOverride.value, faceState.value.outputMode)
 
-    private fun execute(command: GameCommand) {
+    /**
+     * [carryOut] is false when something else has already carried the command out — see [onGesture].
+     * Everything that acts on the screen goes through [LivePlay.perform], which is the same path a live
+     * session uses, so the overlay presses where the button really is, at the pointer's real position,
+     * with the same tap logic. That is the point of sharing the one overlay: the preview can press,
+     * instead of only saying it would.
+     */
+    private fun execute(command: GameCommand, carryOut: Boolean = true) {
         when (command) {
-            is GameCommand.Press -> post("Pressed ${command.button.label}", OverlayEvent.Kind.BUTTON, command.button.id)
-            GameCommand.Select -> select()
+            is GameCommand.Press -> {
+                if (carryOut) livePlay?.perform(command)
+                post("Pressed ${command.button.label}", OverlayEvent.Kind.BUTTON, command.button.id)
+            }
+            GameCommand.Select -> select(carryOut)
             GameCommand.Pause -> if (!_paused.value) togglePause()
             GameCommand.Resume -> if (_paused.value) togglePause()
             GameCommand.TogglePause -> togglePause()
             GameCommand.Recenter -> recenter()
+            GameCommand.ToggleCenterLock -> setCenterLock(!_centerLocked.value)
+            is GameCommand.CenterLock -> setCenterLock(command.locked)
             GameCommand.Back, GameCommand.Home, GameCommand.Exit -> exit()
             GameCommand.HideOverlay -> setOverlayHidden(true)
             GameCommand.ShowOverlay -> setOverlayHidden(false)
             GameCommand.ShowControls -> setControlsShown(true)
             GameCommand.HideControls -> setControlsShown(false)
-            // Phone-wide actions only act in the real game; the preview just shows them.
-            GameCommand.Notifications -> post("Notifications (in the real game only)", OverlayEvent.Kind.ACTION)
-            GameCommand.AllApps -> post("All apps (in the real game only)", OverlayEvent.Kind.ACTION)
-            GameCommand.TouchHold -> post("Touch & hold (in the real game only)", OverlayEvent.Kind.ACTION)
-            GameCommand.Recents -> post("Recent apps (in the real game only)", OverlayEvent.Kind.ACTION)
-            is GameCommand.Scroll -> post("Scroll ${command.direction.name.lowercase()} (in the real game only)", OverlayEvent.Kind.ACTION)
-            GameCommand.StartDrag -> post("Drag (in the real game only)", OverlayEvent.Kind.ACTION)
-            GameCommand.Drop -> post("Drop (in the real game only)", OverlayEvent.Kind.ACTION)
+            GameCommand.Notifications -> {
+                if (carryOut) livePlay?.perform(command)
+                post("Notifications", OverlayEvent.Kind.ACTION)
+            }
+            GameCommand.AllApps -> {
+                if (carryOut) livePlay?.perform(command)
+                post("All apps", OverlayEvent.Kind.ACTION)
+            }
+            GameCommand.TouchHold -> {
+                if (carryOut) livePlay?.perform(command)
+                post("Touch & hold", OverlayEvent.Kind.ACTION)
+            }
+            GameCommand.Recents -> {
+                if (carryOut) livePlay?.perform(command)
+                post("Recent apps", OverlayEvent.Kind.ACTION)
+            }
+            is GameCommand.Scroll -> {
+                if (carryOut) livePlay?.perform(command)
+                post("Scroll ${command.direction.name.lowercase()}", OverlayEvent.Kind.ACTION)
+            }
+            GameCommand.StartDrag -> {
+                if (carryOut) livePlay?.perform(command)
+                post("Drag at the pointer", OverlayEvent.Kind.ACTION)
+            }
+            GameCommand.Drop -> {
+                if (carryOut) livePlay?.perform(command)
+                post("Drop", OverlayEvent.Kind.ACTION)
+            }
+            // These change settings a live session owns, so the preview deliberately leaves them.
             GameCommand.CursorMode -> post("Cursor mode (in the real game only)", OverlayEvent.Kind.ACTION)
             GameCommand.JoystickMode -> post("Joystick mode (in the real game only)", OverlayEvent.Kind.ACTION)
-            // The preview deliberately does not write settings, so the source is the session's to switch.
             GameCommand.GyroMode -> post("Gyro joystick (in the real game only)", OverlayEvent.Kind.ACTION)
             GameCommand.HeadTracking -> post("Head joystick (in the real game only)", OverlayEvent.Kind.ACTION)
             GameCommand.GameMode -> setNavigationMode(NavigationMode.GAME)
@@ -263,6 +306,24 @@ class GameplayViewModel(
         viewModelScope.launch {
             val saved = faceTracking.captureJoystickCenter()
             post(if (saved) "Joystick recentered" else "Can't see your face — look at the camera and try again", OverlayEvent.Kind.ACTION)
+        }
+    }
+
+    /**
+     * The same brake as the live session's, so the preview can be used to check the rules: speech
+     * names the state, a gesture toggles it, and it is refused only where there is no stick to hold.
+     */
+    private fun setCenterLock(locked: Boolean) {
+        GameInput.centerLockRefusal(faceState.value.outputMode)?.let { return post(it, OverlayEvent.Kind.IGNORED) }
+        if (_centerLocked.value == locked) {
+            return post(if (locked) "The centre is already locked" else "The centre is already unlocked", OverlayEvent.Kind.ACTION)
+        }
+        _centerLocked.value = locked
+        if (locked) {
+            post("Centre locked — it stays centred until you repeat the gesture", OverlayEvent.Kind.ACTION)
+        } else {
+            viewModelScope.launch { faceTracking.captureJoystickCenter() }
+            post("Centre unlocked — steering again", OverlayEvent.Kind.ACTION)
         }
     }
 

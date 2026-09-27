@@ -21,7 +21,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.min
 
 /**
@@ -225,26 +228,36 @@ class ContinuousSpeechRecognizer(
 }
 
 /**
- * Guarantees only one recognizer listens at a time: while gameplay's [InGameVoiceEngine] or the
+ * Guarantees only one recognizer listens at a time: while a game-side [InGameVoiceEngine] or the
  * Testing Station's wake-word engine holds the microphone, the app-wide [VoiceCommandManager] stands
  * down.
+ *
+ * The game slot is a **reference count of named holders**, not a flag. PWDe has more than one engine
+ * that can use it — the app recognizer for PWDe's own screens and the sherpa spotter for a session
+ * over the real game — and with a single boolean the first `release` cleared the slot while the other
+ * engine was still recording. The app-wide recognizer then started on top of it, and two `AudioRecord`s
+ * fight over the microphone: the loser hears **silence**, so the spotter goes deaf and in-game voice
+ * commands quietly stop firing. Mutated with `update {}` so a read-modify-write cannot drop a holder.
  */
 class MicArbiter {
-    private val _gameHasMic = MutableStateFlow(false)
-    val gameHasMic: StateFlow<Boolean> = _gameHasMic.asStateFlow()
+    private val gameHolders = MutableStateFlow<Set<String>>(emptySet())
+
+    /** True while any game-side engine is recording. */
+    val gameHasMic: Flow<Boolean> = gameHolders.map { it.isNotEmpty() }
 
     private val _wakeWordHasMic = MutableStateFlow(false)
     val wakeWordHasMic: StateFlow<Boolean> = _wakeWordHasMic.asStateFlow()
 
     /** True while anybody other than the app-wide recognizer is recording. */
-    val busy: Flow<Boolean> = combine(_gameHasMic, _wakeWordHasMic) { game, wakeWord -> game || wakeWord }
+    val busy: Flow<Boolean> = combine(gameHasMic, _wakeWordHasMic) { game, wakeWord -> game || wakeWord }
 
-    fun takeForGame() {
-        _gameHasMic.value = true
+    /** [holder] names the engine, so two in this slot cannot release each other's claim. */
+    fun takeForGame(holder: String) {
+        gameHolders.update { it + holder }
     }
 
-    fun releaseFromGame() {
-        _gameHasMic.value = false
+    fun releaseFromGame(holder: String) {
+        gameHolders.update { it - holder }
     }
 
     fun takeForWakeWord() {
@@ -253,5 +266,19 @@ class MicArbiter {
 
     fun releaseFromWakeWord() {
         _wakeWordHasMic.value = false
+    }
+
+    companion object {
+        private val counter = AtomicInteger()
+
+        /**
+         * A holder name unique to **one engine instance**.
+         *
+         * Two engines must never share a name. The slot is a set, so a shared name means one engine's
+         * `release` frees the other's claim — the app-wide recognizer then starts on top of a recording
+         * one, two `AudioRecord`s fight for the microphone and the loser hears silence, i.e. the spotter
+         * goes deaf. Deriving the name per instance means no call site can get that wrong.
+         */
+        fun newHolder(owner: String): String = "$owner#${counter.incrementAndGet()}"
     }
 }

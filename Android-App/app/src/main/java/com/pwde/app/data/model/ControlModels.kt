@@ -103,9 +103,25 @@ enum class GestureAction(val label: String) {
     BACK("Back"),
     NOTIFICATIONS("Notifications"),
     PAUSE_RESUME("Pause / resume"),
+
+    /** Put the joystick (or the pointer in cursor mode) back to the middle, now. */
     RECENTER("Recenter"),
+
+    /** Hold the joystick at the middle until the same gesture turns it off again. */
+    LOCK_CENTER("Lock center"),
+
     TOUCH_HOLD("Touch & hold"),
     ALL_APPS("All apps"),
+    ;
+
+    /**
+     * True for the actions that put the stick/pointer back to the middle.
+     *
+     * They are deliberately kept apart from everything else: centering is not phone navigation and it
+     * does not steer, so neither a mode gate nor the joystick's "tilt is the stick" filter may
+     * swallow it. Centering is exactly what a user needs *while* steering, so it must always fire.
+     */
+    val isCentering: Boolean get() = this == RECENTER || this == LOCK_CENTER
 }
 
 enum class VoiceMatchMode(val label: String, val description: String) {

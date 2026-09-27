@@ -71,6 +71,14 @@ class LiveGameSession(
                 launch { controlsRepository.config.collect { config = it } }
                 // Collecting the state is what keeps the camera running in the background.
                 launch { faceTracking.state.collect { face -> livePlay.update { it.copy(face = face) } } }
+                // The engine follows the user between the app and the game, so what has the microphone is
+                // republished as it changes — otherwise the overlay caption names the engine chosen when
+                // the session started, and a switch is invisible even when it happens.
+                launch {
+                    voiceEngine.state.collect { voice ->
+                        voice.modelLabel?.let { label -> livePlay.update { it.copy(voiceModel = label) } }
+                    }
+                }
                 launch {
                     faceTracking.state.map { it.joystick.direction }.distinctUntilChanged().collect(::onJoystickDirection)
                 }
@@ -159,6 +167,8 @@ class LiveGameSession(
             GameCommand.Resume -> setPaused(false)
             GameCommand.TogglePause -> setPaused(!livePlay.state.value.paused)
             GameCommand.Recenter -> recenterForMode()
+            GameCommand.ToggleCenterLock -> setCenterLock(!livePlay.state.value.centerLocked)
+            is GameCommand.CenterLock -> setCenterLock(command.locked)
             GameCommand.Exit -> onExit()
             GameCommand.HideOverlay -> livePlay.update { it.copy(overlayHidden = true) }
             GameCommand.ShowOverlay -> livePlay.update { it.copy(overlayHidden = false) }
@@ -207,6 +217,27 @@ class LiveGameSession(
         }
     }
 
+    /**
+     * The brake. While it is on, `steerStick` takes its existing release path, so PWDe lifts the
+     * game's movement finger and the character simply stops — it stays stopped however the head or
+     * phone moves. The same gesture turns it off again; speech names the state outright.
+     *
+     * Unlocking re-takes the neutral: the head very likely drifted while the stick was held still, so
+     * without this the first unlocked frame would jerk the character off in that direction.
+     */
+    private fun setCenterLock(locked: Boolean) {
+        GameInput.centerLockRefusal(livePlay.state.value.face.outputMode)?.let { return message(it) }
+        if (livePlay.state.value.centerLocked == locked) {
+            return message(if (locked) "The centre is already locked" else "The centre is already unlocked")
+        }
+        livePlay.update { it.copy(centerLocked = locked) }
+        message(
+            if (locked) "Centre locked — it stays centred until you repeat the gesture"
+            else "Centre unlocked — steering again",
+        )
+        if (!locked) scope?.launch { faceTracking.captureJoystickCenter() }
+    }
+
     private fun showControls() {
         val buttons = livePlay.state.value.buttons
         if (buttons.isEmpty()) return message("This profile has no mapped buttons")
@@ -226,6 +257,8 @@ class LiveGameSession(
 
     private fun switchMode(mode: InputMode, label: String) {
         scope?.launch { settingsRepository.setInputMode(mode) }
+        // The brake belongs to the mode it was set in: a cursor has no stick to hold still.
+        livePlay.update { it.copy(centerLocked = false) }
         message(label)
     }
 

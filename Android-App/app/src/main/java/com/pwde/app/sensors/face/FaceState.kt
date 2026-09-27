@@ -150,9 +150,22 @@ class FaceFrameProcessor {
             // Steered by the phone, not by a face: tilting the phone is the stick, and reading a
             // phone movement as a smile or a shake would press buttons every time the user turned.
             state.isGyro -> emptySet()
-            state.outputMode == FaceOutputMode.JOYSTICK ->
-                enabled - setOf(FacialGesture.TILT_LEFT, FacialGesture.TILT_RIGHT, FacialGesture.NOD)
+            state.outputMode == FaceOutputMode.JOYSTICK -> enabled - steeringGestures(controls)
             else -> enabled
         }
     }
+
+    /**
+     * The moves that double as steering while the head drives the stick, so they are not read as
+     * actions in joystick mode — **unless** the user bound them to a centering action.
+     *
+     * Centering is the one thing a user needs *while* steering, so a "Center" or "Lock center"
+     * binding on a tilt must survive this filter. This is not a steering conflict to warn about; it
+     * is the rule that game mode turns off the phone's own navigation and nothing else.
+     * (Shake is absent on purpose: it reads yaw, which the stick ignores, so it never steered.)
+     */
+    private fun steeringGestures(controls: ControlConfig): Set<FacialGesture> =
+        setOf(FacialGesture.TILT_LEFT, FacialGesture.TILT_RIGHT, FacialGesture.NOD)
+            .filterNot { controls.actionFor(it)?.isCentering == true }
+            .toSet()
 }

@@ -47,6 +47,8 @@ class SherpaInGameVoiceEngine(
     private val tuningStore: WakeWordTuningStore,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
 ) : BaseInGameVoiceEngine() {
+    /** Unique to this instance: see [MicArbiter.newHolder]. */
+    private val micHolder = MicArbiter.newHolder("sherpa")
 
     // The engine holds the game's mic claim for the whole session itself, so restarting the spotter
     // (a new profile, new tuning) never leaves a gap for the app-wide recognizer to grab the mic.
@@ -100,7 +102,7 @@ class SherpaInGameVoiceEngine(
 
     override fun start() {
         scope.launch {
-            micArbiter.takeForGame()
+            micArbiter.takeForGame(micHolder)
             listenJob?.cancel()
             listenJob = launch {
                 updateState { it.copy(running = true) }
@@ -132,7 +134,7 @@ class SherpaInGameVoiceEngine(
             spotter.stop()
             onUtteranceAborted()
             updateState { it.copy(running = false, listening = false, level = 0f) }
-            micArbiter.releaseFromGame()
+            micArbiter.releaseFromGame(micHolder)
         }
     }
 

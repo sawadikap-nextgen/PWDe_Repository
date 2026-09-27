@@ -212,7 +212,7 @@ internal val GESTURES_COMMANDS = GestureAction.entries.map { voiceCommand(it.nam
     voiceCommand("previous_page", "previous page", "previous"),
 )
 
-/** E2/E3 Gestures: 8 actions over two pages, conflicts flagged. */
+/** Gestures: each action over a page, conflicts flagged. Center and Lock center always work in game mode. */
 @Composable
 fun GesturesScreen(viewModel: GesturesViewModel, onBack: () -> Unit, onChoose: (GestureAction) -> Unit) {
     val config by viewModel.config.collectAsStateWithLifecycle()
@@ -268,7 +268,9 @@ fun GesturesScreen(viewModel: GesturesViewModel, onBack: () -> Unit, onChoose: (
         }
         InfoNote(
             "Gestures fire their actions in PWDe's play overlay. Notifications, All apps and Touch & hold need " +
-                    "system access PWDe doesn't have, so they act inside the overlay only, not on the rest of your phone.",
+                    "system access PWDe doesn't have, so they act inside the overlay only, not on the rest of your phone. " +
+                    "Center and Lock center always work in game mode too: Lock center holds the movement stick still " +
+                    "until you make the same face again.",
         )
     }
 }

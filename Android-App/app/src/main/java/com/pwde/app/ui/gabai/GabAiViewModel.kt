@@ -116,11 +116,16 @@ class GabAiViewModel(
     faceTracking: FaceTrackingManager,
     start: GabAiStart,
     private val hudDetector: HudDetector = HudDetector.None,
-    /** The speech model gameplay presses mapped buttons with (see `InGameVoiceEngine.modelLabel`). */
+    /** The speech model the test step presses mapped buttons with (see `InGameVoiceEngine.modelLabel`). */
     val buttonSpeechModel: String = "Unknown",
-    /** Gameplay's own voice engine, so the test step hears button phrases exactly as a game would. */
+    /**
+     * The engine the test step listens with. In-app it is the app-wide recognizer (`AppContainer`'s
+     * `inAppVoiceEngine`): GabAI runs with PWDe on screen, where the user is already speaking to that
+     * one, so the test hears exactly what a spoken button phrase would do. Only a live session over
+     * the real game uses the sherpa-onnx spotter.
+     */
     private val inGameVoice: InGameVoiceEngine? = null,
-    /** A live session shares [inGameVoice]; testing waits for it to end. */
+    /** The test waits for a live session over the real game to end: it takes the mic for itself. */
     private val livePlay: LivePlay? = null,
 ) : FaceTrackingViewModel(faceTracking) {
     /** The speech model behind GabAI's own voice commands and "assign/use" dictation. */

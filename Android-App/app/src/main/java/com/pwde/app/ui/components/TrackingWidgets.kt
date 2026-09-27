@@ -66,8 +66,13 @@ fun CursorPad(position: CursorPosition, active: Boolean, modifier: Modifier = Mo
     }
 }
 
+/**
+ * The calibration target pad: a ring where the user should look, and — unless the one overlay is
+ * already drawing the pointer — a dot for where it actually is. [showPointer] is false when PWDe's
+ * accessibility overlay is on, so the pad never doubles a pointer the user can see twice.
+ */
 @Composable
-fun BoxScope.CursorCalibrationOverlay(x: Float, y: Float, active: Boolean, target: Offset) {
+fun BoxScope.CursorCalibrationOverlay(x: Float, y: Float, active: Boolean, target: Offset, showPointer: Boolean = true) {
     val colors = PwdeTheme.colors
     val onTarget = kotlin.math.hypot(x - target.x, y - target.y) < 0.1f
     Canvas(
@@ -80,7 +85,7 @@ fun BoxScope.CursorCalibrationOverlay(x: Float, y: Float, active: Boolean, targe
         val targetCenter = Offset(target.x * size.width, target.y * size.height)
         drawCircle(colors.primary.copy(alpha = if (onTarget) 0.5f else 0.2f), radius = 26.dp.toPx(), center = targetCenter)
         drawCircle(colors.primary, radius = 26.dp.toPx(), center = targetCenter, style = Stroke(3.dp.toPx()))
-        drawCircle(if (active) colors.secondary else colors.textMuted, radius = 12.dp.toPx(), center = Offset(x * size.width, y * size.height))
+        if (showPointer) drawCircle(if (active) colors.secondary else colors.textMuted, radius = 12.dp.toPx(), center = Offset(x * size.width, y * size.height))
     }
     if (onTarget) {
         StatusPill(
