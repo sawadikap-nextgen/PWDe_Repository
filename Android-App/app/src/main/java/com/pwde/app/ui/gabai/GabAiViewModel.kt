@@ -14,6 +14,7 @@ import com.pwde.app.data.gabai.GabAiRepository
 import com.pwde.app.data.gabai.GabAiSession
 import com.pwde.app.data.gabai.GabAiState
 import com.pwde.app.data.gabai.JoystickParameter
+import com.pwde.app.data.gabai.SuggestedPhrases
 import com.pwde.app.data.gabai.HudDetector
 import com.pwde.app.data.gabai.detectedToButtons
 import com.pwde.app.data.local.CalibrationProfile
@@ -902,8 +903,10 @@ class GabAiViewModel(
         previousButtonsForUndo = currentButtons
 
         // Apply the auto-mapping
-        currentButtons.forEach { button ->
-            setTrigger(button.id, ButtonTrigger(TriggerType.VOICE, button.label.lowercase()))
+        val gameId = _ui.value.form.gameId
+        // The movement joystick keeps its joystick trigger; a spoken word can't steer it.
+        currentButtons.filter { it.trigger?.type != TriggerType.MOVEMENT }.forEach { button ->
+            setTrigger(button.id, ButtonTrigger(TriggerType.VOICE, SuggestedPhrases.forButton(gameId, button.label)))
         }
 
         // Update UI state and close chooser
