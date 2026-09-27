@@ -60,7 +60,7 @@ class SplashViewModel(
             _destination.value = when {
                 authRepository.authState.value is AuthState.SignedIn -> Routes.DASHBOARD
                 !settings.setupCompleted -> Routes.WELCOME
-                !settings.voiceTutorialCompleted -> Routes.VOICE_TUTORIAL
+                !settings.voiceTutorialCompleted -> Routes.voiceTutorial()
                 else -> Routes.DASHBOARD
             }
         }

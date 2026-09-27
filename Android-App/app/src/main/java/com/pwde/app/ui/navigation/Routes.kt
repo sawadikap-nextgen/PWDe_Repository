@@ -12,7 +12,14 @@ object Routes {
     // B · Setup + voice tutorial
     const val SETUP = "setup?appearanceOnly={appearanceOnly}"
     fun setup(appearanceOnly: Boolean = false) = "setup?appearanceOnly=$appearanceOnly"
-    const val VOICE_TUTORIAL = "voice_tutorial"
+    const val VOICE_TUTORIAL = "voice_tutorial?replay={replay}"
+
+    /**
+     * [replay] is set when the user re-runs onboarding from Profile: the tutorial then returns them
+     * where they came from instead of treating a finished tutorial as "welcome, you're set up" and
+     * dropping them on the Dashboard.
+     */
+    fun voiceTutorial(replay: Boolean = false) = "voice_tutorial?replay=$replay"
 
     // D · Play
     const val DASHBOARD = "dashboard"
