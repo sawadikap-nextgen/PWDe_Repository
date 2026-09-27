@@ -17,24 +17,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Login
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
-import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.SportsEsports
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -84,7 +82,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import com.pwde.app.ui.games.GameThumbnail
 import com.pwde.app.ui.games.GameArt
 
 data class ProfileUiState(
@@ -98,7 +95,7 @@ data class ProfileUiState(
 
 class ProfileViewModel(
     private val authRepository: AuthRepository,
-    syncRepository: SyncRepository,
+    private val syncRepository: SyncRepository,
     private val profileRepository: ProfileRepository,
     private val controlsRepository: ControlsRepository,
     private val settingsRepository: SettingsRepository,
@@ -134,6 +131,10 @@ class ProfileViewModel(
 
     /** Signing out never deletes local profiles. */
     fun signOut() = authRepository.signOut()
+
+    fun syncNow() {
+        viewModelScope.launch { syncRepository.syncNow() }
+    }
 
     fun rename(profile: SavedProfile, name: String) {
         val trimmed = name.trim()
@@ -210,14 +211,26 @@ fun ProfileScreen(
     var dialog by remember { mutableStateOf<ProfileDialog?>(null) }
     var confirmRedo by rememberSaveable { mutableStateOf(false) }
     val notice by viewModel.notice.collectAsStateWithLifecycle()
-    // Game ids whose folder is expanded; closed by default so the list stays short.
-    var openFolders by rememberSaveable { mutableStateOf(emptyList<String>()) }
-    fun toggleFolder(gameId: String) {
-        openFolders = if (gameId in openFolders) openFolders - gameId else openFolders + gameId
+    // Game profile cards whose actions are showing; closed by default so the list stays short.
+    var openProfiles by rememberSaveable { mutableStateOf(emptyList<Long>()) }
+    var showAllGames by rememberSaveable { mutableStateOf(false) }
+    val gamesNewestFirst = remember(state.gameProfiles) {
+        state.gameProfiles.sortedWith(compareByDescending<GameProfile> { it.createdAt }.thenByDescending { it.id })
+    }
+    fun toggleProfile(id: Long) {
+        openProfiles = if (id in openProfiles) openProfiles - id else openProfiles + id
+    }
+    /** Saying a game's name opens its newest profile, expanding the list if it's an older one. */
+    fun openGame(gameId: String) {
+        val index = gamesNewestFirst.indexOfFirst { it.gameId == gameId }
+        if (index < 0) return
+        if (index >= RECENT_GAME_PROFILES) showAllGames = true
+        val id = gamesNewestFirst[index].id
+        if (id !in openProfiles) openProfiles = openProfiles + id
     }
     VoiceCommandsEffect(PROFILE_COMMANDS) { id ->
         when {
-            id.startsWith("folder:") -> toggleFolder(id.removePrefix("folder:"))
+            id.startsWith("folder:") -> openGame(id.removePrefix("folder:"))
             id.startsWith("tab:") -> onTab(MainTab.valueOf(id.removePrefix("tab:")))
             id == "sign_in" -> if (signedIn == null) onSignIn()
             id == "appearance" -> onEditAppearance()
@@ -260,7 +273,7 @@ fun ProfileScreen(
             }
         }
 
-        SyncCard(state, onSignIn, viewModel::signOut)
+        SyncCard(state, onSignIn, viewModel::signOut, viewModel::syncNow)
 
         SectionTitle("Calibration profiles")
         if (state.calibrationProfiles.isEmpty()) {
@@ -281,45 +294,58 @@ fun ProfileScreen(
 
         SectionTitle("Game profiles")
         if (state.gameProfiles.isEmpty()) {
-            InfoNote("No game profiles yet. GabAI makes one for each game: you mark its buttons and pick how to press them.")
+            InfoNote("No game profiles yet. GabAI will help you make one.")
         } else {
-            gameFolders(state.gameProfiles).forEach { folder ->
-                val open = folder.gameId in openFolders
-                GameFolderCard(folder, open, onToggle = { toggleFolder(folder.gameId) })
-                if (open) folder.profiles.forEach {
-                    ProfileRow(
-                        profile = SavedProfile.Game(it),
-                        icon = Icons.Outlined.SportsEsports,
-                        onRename = { p -> dialog = ProfileDialog.Rename(p) },
-                        onDelete = { p -> dialog = ProfileDialog.Delete(p) },
-                        game = Game.byId(it.gameId),   // <-- new
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
-                            PwdeButton(
-                                "Play",
-                                { onPlayGameProfile(it.gameId, it.id) },
-                                icon = Icons.Outlined.SportsEsports,
-                                modifier = Modifier.weight(1f),
-                                contentPadding = pairedButtonPadding(),
-                            )
-                            PwdeButton(
-                                "Test",
-                                { onTestGameProfile(it.gameId, it.id) },
-                                style = ButtonStyle.SECONDARY,
-                                modifier = Modifier.weight(1f),
-                                contentPadding = pairedButtonPadding(),
-                            )
-                        }
+            val shownGames = if (showAllGames) gamesNewestFirst else gamesNewestFirst.take(RECENT_GAME_PROFILES)
+            shownGames.forEach {
+                val open = it.id in openProfiles
+                GameProfileCard(it, open, onToggle = { toggleProfile(it.id) })
+                if (open) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
                         PwdeButton(
-                            "Edit buttons & mappings",
-                            { onEditGameProfile(it.id) },
+                            "Play",
+                            { onPlayGameProfile(it.gameId, it.id) },
+                            icon = Icons.Outlined.SportsEsports,
+                            modifier = Modifier.weight(1f),
+                            contentPadding = pairedButtonPadding(),
+                        )
+                        PwdeButton(
+                            "Test",
+                            { onTestGameProfile(it.gameId, it.id) },
                             style = ButtonStyle.SECONDARY,
-                            icon = Icons.Outlined.AutoAwesome,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.weight(1f),
                             contentPadding = pairedButtonPadding(),
                         )
                     }
+                    PwdeButton(
+                        "Edit buttons & mappings",
+                        { onEditGameProfile(it.id) },
+                        style = ButtonStyle.SECONDARY,
+                        icon = Icons.Outlined.AutoAwesome,
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = pairedButtonPadding(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
+                        val saved = SavedProfile.Game(it)
+                        PwdeButton(
+                            "Rename", { dialog = ProfileDialog.Rename(saved) }, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.Edit,
+                            modifier = Modifier.weight(1f), contentPadding = pairedButtonPadding(),
+                        )
+                        PwdeButton(
+                            "Delete", { dialog = ProfileDialog.Delete(saved) }, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.Delete,
+                            modifier = Modifier.weight(1f), contentPadding = pairedButtonPadding(),
+                        )
+                    }
                 }
+            }
+            if (gamesNewestFirst.size > RECENT_GAME_PROFILES) {
+                PwdeButton(
+                    if (showAllGames) "Show less" else "Show ${gamesNewestFirst.size - RECENT_GAME_PROFILES} more",
+                    { showAllGames = !showAllGames },
+                    style = ButtonStyle.SECONDARY,
+                    icon = if (showAllGames) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 
@@ -333,10 +359,7 @@ fun ProfileScreen(
             Icons.Outlined.RestartAlt,
             { confirmRedo = true },
         )
-        InfoNote(
-            "Your profiles, games and gestures are kept — this only asks for permissions again and " +
-                "re-tunes the pointer. Use Appearance for colours and text size only.",
-        )
+        InfoNote("Keeps your profiles; only redoes permissions and pointer tuning.")
     }
 
     if (confirmRedo) {
@@ -363,15 +386,11 @@ private fun CalibrationProfileCarousel(
     onActivate: (CalibrationProfile) -> Unit,
     onEdit: (Long) -> Unit,
 ) {
-    val pagerState = rememberPagerState(pageCount = { profiles.size })
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val newestFirst = remember(profiles) { profiles.sortedWith(compareByDescending<CalibrationProfile> { it.createdAt }.thenByDescending { it.id }) }
+    val shown = if (expanded) newestFirst else newestFirst.take(RECENT_CALIBRATIONS)
     Column(verticalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
-        HorizontalPager(
-            state = pagerState,
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            pageSpacing = PwdeTheme.spacing.itemGap,
-            modifier = Modifier.fillMaxWidth(),
-        ) { page ->
-            val profile = profiles[page]
+        shown.forEach { profile ->
             val active = profile.id == activeProfileId
             GradientCard(
                 Modifier.fillMaxWidth(),
@@ -404,98 +423,41 @@ private fun CalibrationProfileCarousel(
                 }
             }
         }
-        if (profiles.size > 1) {
-            Text(
-                "Swipe to browse · ${pagerState.currentPage + 1} of ${profiles.size}",
-                style = MaterialTheme.typography.labelMedium,
-                color = PwdeTheme.colors.textMuted,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
+        if (profiles.size > RECENT_CALIBRATIONS) {
+            PwdeButton(
+                if (expanded) "Show less" else "Show ${profiles.size - RECENT_CALIBRATIONS} more",
+                { expanded = !expanded },
+                style = ButtonStyle.SECONDARY,
+                icon = if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
 }
 
-/** One game's profiles, like a folder. */
-private data class GameFolder(val gameId: String, val name: String, val profiles: List<GameProfile>)
+/** How many of the newest calibration profiles show before "Show more". */
+internal const val RECENT_CALIBRATIONS = 2
 
-/** Supported games first, in catalog order; profiles for games no longer listed come last. */
-private fun gameFolders(profiles: List<GameProfile>): List<GameFolder> {
-    val order = Game.entries.map { it.id }
-    return profiles.groupBy { it.gameId }
-        .map { (gameId, list) -> GameFolder(gameId, Game.byId(gameId)?.displayName ?: list.first().gameName, list) }
-        .sortedWith(compareBy({ order.indexOf(it.gameId).let { i -> if (i < 0) Int.MAX_VALUE else i } }, { it.name }))
-}
+/** How many of the newest game profiles show before "Show more". */
+private const val RECENT_GAME_PROFILES = 2
 
+/** A game profile drawn like the Games tab's [com.pwde.app.ui.games.GameCard]: banner art, name, then status. */
 @Composable
-private fun GameFolderCard(folder: GameFolder, open: Boolean, onToggle: () -> Unit) {
+private fun GameProfileCard(profile: GameProfile, open: Boolean, onToggle: () -> Unit) {
     val colors = PwdeTheme.colors
-    val spacing = PwdeTheme.spacing
-    val count = "${folder.profiles.size} ${if (folder.profiles.size == 1) "profile" else "profiles"}"
+    val game = Game.byId(profile.gameId)
     GradientCard(
         Modifier.fillMaxWidth().semantics { stateDescription = if (open) "Open" else "Closed" },
         selected = open,
         onClick = onToggle,
-        contentPadding = spacing.screenMargin,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(spacing.itemGap)) {
-            val game = Game.byId(folder.gameId)
-            if (game != null) {
-                GameThumbnail(game, fallbackIcon = if (open) Icons.Outlined.FolderOpen else Icons.Outlined.Folder)
-            } else {
-                IconBadge(if (open) Icons.Outlined.FolderOpen else Icons.Outlined.Folder)
-            }
+        if (game != null) GameArt(game, aspectRatio = 2.4f)
+        Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(folder.name, style = MaterialTheme.typography.titleMedium, color = colors.text)
-                Text(count, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                Text(profile.profileName, style = MaterialTheme.typography.titleLarge, color = colors.text)
+                Text(game?.displayName ?: profile.gameName, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
             }
             Icon(if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, contentDescription = null, tint = colors.primary)
-        }
-    }
-}
-
-/**
- * One saved profile (calibration or game) with rename and delete. Card padding and the gaps between
- * header, primary action and rename/delete all come from the spacing tokens.
- */
-@Composable
-private fun ProfileRow(
-    profile: SavedProfile,
-    icon: ImageVector,
-    onRename: (SavedProfile) -> Unit,
-    onDelete: (SavedProfile) -> Unit,
-    game: Game? = null,          // <-- new
-    primary: @Composable () -> Unit,
-) {
-    val colors = PwdeTheme.colors
-    val spacing = PwdeTheme.spacing
-    GradientCard(Modifier.fillMaxWidth(), contentPadding = spacing.screenMargin) {
-        Column(verticalArrangement = Arrangement.spacedBy(spacing.itemGap)) {
-
-            // NEW: show the full banner for game profiles, icon badge otherwise
-            if (game != null) {
-                GameArt(game)
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(spacing.itemGap)) {
-                if (game == null) {
-                    IconBadge(icon)
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(profile.name, style = MaterialTheme.typography.titleMedium, color = colors.text)
-                    Text(profile.detail, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
-                }
-            }
-            primary()
-            Row(horizontalArrangement = Arrangement.spacedBy(spacing.itemGap)) {
-                PwdeButton(
-                    "Rename", { onRename(profile) }, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.Edit,
-                    modifier = Modifier.weight(1f), contentPadding = pairedButtonPadding(),
-                )
-                PwdeButton(
-                    "Delete", { onDelete(profile) }, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.Delete,
-                    modifier = Modifier.weight(1f), contentPadding = pairedButtonPadding(),
-                )
-            }
         }
     }
 }
@@ -527,13 +489,13 @@ private fun DeleteDialog(profile: SavedProfile, onDismiss: () -> Unit, onConfirm
         onDismissRequest = onDismiss,
         containerColor = PwdeTheme.colors.surface,
         title = { Text("Delete \"${profile.name}\"?", color = PwdeTheme.colors.text) },
-        text = { Text("This removes it from this phone. It can't be undone.", color = PwdeTheme.colors.textMuted) },
+        text = { Text("This removes it from this phone, and from your account if you're signed in. It can't be undone.", color = PwdeTheme.colors.textMuted) },
         confirmButton = { PwdeButton("Delete", onConfirm, style = ButtonStyle.DESTRUCTIVE, contentPadding = buttonPadding()) },
         dismissButton = { PwdeButton("Keep it", onDismiss, style = ButtonStyle.SECONDARY, contentPadding = buttonPadding()) },
     )
 }
 @Composable
-private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () -> Unit) {
+private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () -> Unit, onSyncNow: () -> Unit) {
     val colors = PwdeTheme.colors
     val spacing = PwdeTheme.spacing
     // Same card padding and item gaps as the profile cards; every child is spaced evenly.
@@ -546,7 +508,7 @@ private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () 
                         Column(Modifier.weight(1f)) {
                             Text("Saved on this phone", style = MaterialTheme.typography.titleMedium, color = colors.text)
                             Text(
-                                "Sign in to sync your profiles across devices. Nothing here is lost when you do.",
+                                "Sign in to sync across devices. Nothing is lost.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textMuted,
                             )
@@ -557,19 +519,38 @@ private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () 
                         StatusPill("Accounts aren't set up in this build", color = colors.textMuted, icon = Icons.Outlined.CloudOff)
                     }
                 }
-                SyncStatus.NotAvailable -> {
+                else -> {
+                    val signedIn = state.auth as? AuthState.SignedIn
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(spacing.itemGap)) {
                         IconBadge(Icons.Outlined.CloudSync)
                         Column(Modifier.weight(1f)) {
                             Text("Sync status", style = MaterialTheme.typography.titleMedium, color = colors.text)
-                            StatusPill("Cloud sync not available yet", color = colors.warning, icon = Icons.Outlined.CloudOff)
+                            signedIn?.email?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                            }
                         }
                     }
+                    when (val status = state.syncStatus) {
+                        SyncStatus.Syncing -> StatusPill("Syncing…", icon = Icons.Outlined.CloudSync)
+                        is SyncStatus.Synced -> StatusPill(
+                            status.at?.let { "Synced ${syncTimeLabel(it)}" } ?: "Not synced yet",
+                            icon = Icons.Outlined.CloudDone,
+                        )
+                        is SyncStatus.Error -> StatusPill("Sync didn't finish", color = colors.warning, icon = Icons.Outlined.CloudOff)
+                        else -> StatusPill("Cloud sync isn't set up in this build", color = colors.warning, icon = Icons.Outlined.CloudOff)
+                    }
                     Text(
-                        "You're signed in. Your profiles are safe on this phone; syncing them to the cloud is coming in a later update.",
+                        when (val status = state.syncStatus) {
+                            is SyncStatus.Error -> status.message
+                            SyncStatus.NotAvailable -> "You're signed in. Your profiles are safe on this phone."
+                            else -> "Your profiles and settings sync automatically."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textMuted,
                     )
+                    if (state.syncStatus != SyncStatus.NotAvailable) {
+                        SyncActionButton("Sync now", Icons.Outlined.Sync, onSyncNow, enabled = state.syncStatus != SyncStatus.Syncing)
+                    }
                     SyncActionButton("Sign out", Icons.AutoMirrored.Outlined.Logout, onSignOut)
                 }
             }
@@ -583,13 +564,24 @@ private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () 
  * the long label on one line on most phones.
  */
 @Composable
-private fun SyncActionButton(text: String, icon: ImageVector, onClick: () -> Unit) {
+private fun SyncActionButton(text: String, icon: ImageVector, onClick: () -> Unit, enabled: Boolean = true) {
     PwdeButton(
         text,
         onClick,
+        enabled = enabled,
         style = ButtonStyle.SECONDARY,
         icon = icon,
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = PwdeTheme.spacing.screenMargin, vertical = PwdeTheme.spacing.section),
     )
+}
+
+/** "just now", "5 min ago", or the time of day for older syncs. */
+private fun syncTimeLabel(at: Long, now: Long = System.currentTimeMillis()): String {
+    val minutes = (now - at) / 60_000
+    return when {
+        minutes < 1 -> "just now"
+        minutes < 60 -> "$minutes min ago"
+        else -> "at " + java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(at))
+    }
 }

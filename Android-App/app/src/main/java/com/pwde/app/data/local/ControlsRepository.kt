@@ -82,6 +82,14 @@ class ControlsRepository(
         it.copy(voiceShortcuts = it.voiceShortcuts + (shortcut to phrase))
     }
 
+    /** The stored working controls row as-is, for cloud sync. */
+    suspend fun syncedEntity(): ControlSettingsEntity? = writeLock.withLock { dao.get() }
+
+    /** Replaces the working controls with a row from the cloud, keeping its updatedAt. */
+    suspend fun writeSyncedEntity(entity: ControlSettingsEntity) = writeLock.withLock {
+        dao.upsert(entity.copy(id = ControlSettingsEntity.SINGLETON_ID))
+    }
+
     private suspend fun edit(persistToActiveProfile: Boolean = false, transform: (ControlConfig) -> ControlConfig) = writeLock.withLock {
         val currentEntity = dao.get()
         val current = currentEntity?.toConfig() ?: ControlConfig()

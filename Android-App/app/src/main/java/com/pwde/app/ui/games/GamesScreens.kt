@@ -392,7 +392,7 @@ fun GameDetailScreen(
         GameArt(game)
         Text(game.description, style = MaterialTheme.typography.bodyLarge, color = colors.text)
         if (profiles.isEmpty()) {
-            InfoNote("No game profile yet. GabAI will walk you through mapping this game's buttons to your head, face and voice.")
+            InfoNote("No game profile yet.")
         } else {
             SectionTitle("Your profiles for this game")
             profiles.forEach { profile ->
@@ -413,11 +413,7 @@ fun GameDetailScreen(
             icon = Icons.Outlined.AutoAwesome,
             modifier = Modifier.fillMaxWidth(),
         )
-        InfoNote(
-            "Play opens ${game.displayName} and keeps PWDe running on top of it, with a notification to pause or stop. " +
-                    "Test tries a profile on its screenshot inside PWDe first.",
-            icon = Icons.Outlined.Info,
-        )
+        InfoNote("Test tries a profile on its screenshot first.", icon = Icons.Outlined.Info)
     }
 }
 
@@ -430,7 +426,7 @@ private enum class GameFilter(val label: String, val matches: (Game, Set<String>
 
 internal val GAME_DETAIL_COMMANDS = listOf(
     voiceCommand("play", "play", "launch game", "launch", "start"),
-    voiceCommand("gabai", "set up with gabai", "new profile", "gabai", "gab ai"),
+    voiceCommand("gabai", "set up with gabai", "new profile with gabai", "new profile", "gabai", "gab ai"),
 )
 
 /** D2 Games: narrow the game list by genre or setup status; tiles show their setup status. */
@@ -454,7 +450,7 @@ fun GamesScreen(viewModel: GamesViewModel, onGame: (Game) -> Unit, onTab: (MainT
     VoiceCommandsEffect(filterCommands) { id -> filter = GameFilter.valueOf(id) }
     PwdeScreen(
         title = "Games",
-        subtitle = "Pick a game to play or set up. Filter by type or setup status.",
+        subtitle = null,
         voiceHint = "Say a game's or filter's name",
         bottomBar = { PwdeBottomNav(MainTab.GAMES, onTab) },
     ) {

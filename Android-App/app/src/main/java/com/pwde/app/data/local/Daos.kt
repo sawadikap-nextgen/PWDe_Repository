@@ -13,6 +13,9 @@ interface CalibrationProfileDao {
     @Query("SELECT * FROM calibration_profiles ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<CalibrationProfile>>
 
+    @Query("SELECT * FROM calibration_profiles")
+    suspend fun getAll(): List<CalibrationProfile>
+
     @Query("SELECT * FROM calibration_profiles WHERE id = :id")
     suspend fun getById(id: Long): CalibrationProfile?
 
@@ -30,6 +33,9 @@ interface CalibrationProfileDao {
 interface GameProfileDao {
     @Query("SELECT * FROM game_profiles ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<GameProfile>>
+
+    @Query("SELECT * FROM game_profiles")
+    suspend fun getAll(): List<GameProfile>
 
     @Query("SELECT * FROM game_profiles WHERE gameId = :gameId ORDER BY updatedAt DESC")
     fun observeForGame(gameId: String): Flow<List<GameProfile>>

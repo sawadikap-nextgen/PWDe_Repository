@@ -86,7 +86,7 @@ class PlayService : Service() {
         val c = container
         val next = LiveGameSession(
             c.livePlay, c.faceTrackingManager, c.inGameVoiceEngine, c.profileRepository,
-            c.controlsRepository, c.settingsRepository, onExit = ::exitToPwde,
+            c.controlsRepository, c.settingsRepository, onExit = ::exitToPwde, onPlayOtherGame = ::playOtherGame,
         )
         val previous = sessionJob
         session = next
@@ -127,6 +127,19 @@ class PlayService : Service() {
         // Without the permission the notification stays hidden but the service keeps running.
         if (Build.VERSION.SDK_INT >= 33 && !granted(this, Manifest.permission.POST_NOTIFICATIONS)) return
         runCatching { NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, notification) }
+    }
+
+    /**
+     * "profile <name>" for another game's profile: the same path as "play <game>" in PWDe, which
+     * restarts this service's session on that game and opens it. A refusal (not installed, no
+     * camera or mic) is shown on the overlay rather than lost.
+     */
+    private fun playOtherGame(game: Game, profileId: Long) {
+        val c = container
+        scope.launch {
+            val text = startPlaying(this@PlayService, c.profileRepository, game, profileId)
+            c.livePlay.update { it.copy(message = text) }
+        }
     }
 
     /** "exit" in game: stop, and bring PWDe back. */

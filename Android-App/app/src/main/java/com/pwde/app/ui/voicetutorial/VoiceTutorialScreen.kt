@@ -111,7 +111,7 @@ private fun SayTheNameStep() {
     }
     SectionTitle("You don't need to be exact")
     Text(
-        "PWDe listens for the closest match, so slurred, slow or partial words still work.",
+        "Slow, slurred or partial words still work.",
         style = MaterialTheme.typography.bodyMedium,
         color = colors.textMuted,
     )
@@ -141,7 +141,7 @@ private fun EverythingVoiceStep() {
     AreaRow(Icons.Outlined.Settings, "Menus & settings", "Say any card or button name")
     AreaRow(Icons.Outlined.OpenWith, "Moving things", "Say \"move joystick up\" to reposition controls")
     AreaRow(Icons.Outlined.SportsEsports, "While you play", "Say \"pause\", \"recenter\" or a custom button's name")
-    InfoNote("Voice is on now: try saying \"next\". Moving controls by voice arrives with custom buttons in a later update.")
+    InfoNote("Voice is on: try saying \"next\".")
 }
 
 @Composable
@@ -162,7 +162,7 @@ private fun ReadAloudStep(state: VoiceTutorialUiState, viewModel: VoiceTutorialV
     val colors = PwdeTheme.colors
     SwitchRow(
         title = "Read on-screen text aloud",
-        description = "Speaks a screen's contents — its labels, values and buttons — in your phone's voice",
+        description = "Reads the screen aloud",
         checked = state.ttsEnabled,
         onCheckedChange = viewModel::setTtsEnabled,
         icon = Icons.AutoMirrored.Outlined.VolumeUp,

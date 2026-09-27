@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,13 +41,18 @@ import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import com.pwde.app.ui.profile.RECENT_CALIBRATIONS
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.pwde.app.data.local.CalibrationProfile
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -122,27 +128,31 @@ internal fun ChooseGameStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
 
 private val CONFIRM_COMMANDS = listOf(
     voiceCommand("use", "use this one", "next", "confirm"),
-    voiceCommand("new", "new calibration", "make a new one"),
+    voiceCommand("new", "make a new calibration", "new calibration", "make a new one"),
 )
 
 @Composable
 internal fun ConfirmCalibrationStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     val profiles by viewModel.calibrationProfiles.collectAsStateWithLifecycle()
     val selected = ui.form.calibrationProfileId
+    // Start open when the picked profile is an older one, so it stays visible.
+    var showAll by rememberSaveable { mutableStateOf(profiles.sortedWith(compareByDescending<CalibrationProfile> { it.createdAt }.thenByDescending { it.id }).drop(RECENT_CALIBRATIONS).any { it.id == selected }) }
     VoiceCommandsEffect(CONFIRM_COMMANDS) { id -> if (id == "use") viewModel.confirmCalibration() else viewModel.calibrateForThisGame() }
     GabAiStep(
         viewModel, ui,
         panelTitle = ui.panelTitle,
         title = "Calibration for ${gameDisplayName(ui.form.gameId) ?: "this game"}",
-        says = if (profiles.isEmpty()) "This game needs a calibration profile first. Let's make one — it only takes a minute."
-        else "Which calibration should this game use? Keep the one I picked, or switch.",
+        says = if (profiles.isEmpty()) "This game needs a calibration first. It takes a minute."
+        else "Which calibration should this game use?",
         voiceHint = if (profiles.isEmpty()) "Say \"new calibration\"" else "Say \"use this one\" or \"new calibration\"",
         footer = if (profiles.isEmpty()) null else {
             { PwdeButton("Use this one", viewModel::confirmCalibration, icon = Icons.AutoMirrored.Outlined.ArrowForward, modifier = Modifier.fillMaxWidth()) }
         },
     ) {
         Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
-            profiles.forEach { profile ->
+            val newestFirst = remember(profiles) { profiles.sortedWith(compareByDescending<CalibrationProfile> { it.createdAt }.thenByDescending { it.id }) }
+            val shown = if (showAll) newestFirst else newestFirst.take(RECENT_CALIBRATIONS)
+            shown.forEach { profile ->
                 OptionCard(
                     profile.name,
                     profile.inputModeOrDefault.let { if (it == InputMode.JOYSTICK) "Joystick" else "Cursor" },
@@ -152,6 +162,15 @@ internal fun ConfirmCalibrationStep(viewModel: GabAiViewModel, ui: GabAiUiState)
                     kind = OptionKind.RADIO,
                 )
             }
+        }
+        if (profiles.size > RECENT_CALIBRATIONS) {
+            PwdeButton(
+                if (showAll) "Show less" else "Show ${profiles.size - RECENT_CALIBRATIONS} more",
+                { showAll = !showAll },
+                style = ButtonStyle.SECONDARY,
+                icon = if (showAll) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
         PwdeButton(
             "Make a new calibration",
@@ -166,8 +185,8 @@ internal fun ConfirmCalibrationStep(viewModel: GabAiViewModel, ui: GabAiUiState)
 // ---------------- Screenshot ----------------
 
 private val SCREENSHOT_COMMANDS = listOf(
-    voiceCommand("pick", "choose screenshot", "pick screenshot", "choose"),
-    voiceCommand("blank", "blank screen", "no screenshot"),
+    voiceCommand("pick", "choose screenshot", "choose a different one", "pick screenshot", "choose"),
+    voiceCommand("blank", "use a blank screen", "blank screen", "no screenshot"),
     voiceCommand("next", "next", "continue"),
 )
 
@@ -180,33 +199,50 @@ internal fun ScreenshotStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         when (id) {
             "pick" -> pick()
             "blank" -> viewModel.useBlankScreen()
-            "next" -> if (hasShot) viewModel.screenshotDone()
+            "next" -> if (hasShot && !ui.detectingButtons) viewModel.screenshotDone()
         }
     }
     GabAiStep(
         viewModel, ui,
         panelTitle = ui.panelTitle,
         title = "Game screenshot",
-        says = "Show me the game: pick a screenshot of it mid-match, with its buttons visible. We'll mark the buttons on it next.",
+        says = "Pick a mid-match screenshot with the game's buttons visible.",
         voiceHint = "Say \"choose screenshot\", \"blank screen\" or \"next\"",
         footer = {
-            PwdeButton("Next", viewModel::screenshotDone, enabled = hasShot, icon = Icons.AutoMirrored.Outlined.ArrowForward, modifier = Modifier.fillMaxWidth())
+            PwdeButton("Next", viewModel::screenshotDone, enabled = hasShot && !ui.detectingButtons, icon = Icons.AutoMirrored.Outlined.ArrowForward, modifier = Modifier.fillMaxWidth())
         },
     ) {
         val shot = ui.screenshot
         if (shot != null) {
-            Image(
-                shot,
-                contentDescription = "Your game screenshot",
-                modifier = Modifier.fillMaxWidth().clip(PwdeShapes.card).border(2.dp, PwdeTheme.colors.borderBrush, PwdeShapes.card),
-                contentScale = ContentScale.FillWidth,
-            )
+            Box(Modifier.fillMaxWidth().clip(PwdeShapes.card).border(2.dp, PwdeTheme.colors.borderBrush, PwdeShapes.card)) {
+                Image(
+                    shot,
+                    contentDescription = "Your game screenshot",
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = ContentScale.FillWidth,
+                )
+                if (ui.detectingButtons) {
+                    Column(
+                        Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.6f))
+                            .semantics { contentDescription = "Processing your screenshot" },
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CircularProgressIndicator(color = Color.White)
+                        Text(
+                            "Finding the buttons…",
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                }
+            }
         }
         PwdeButton(if (shot == null) "Choose screenshot" else "Choose a different one", pick, icon = Icons.Outlined.Image, modifier = Modifier.fillMaxWidth())
         PwdeButton("Use a blank screen instead", viewModel::useBlankScreen, style = ButtonStyle.SECONDARY, modifier = Modifier.fillMaxWidth())
-        if (ui.detectingButtons) InfoNote("Finding the buttons on your screenshot…")
-        val privacy = if (viewModel.autoDetectsButtons) "It's sent to PWDe's server once to find the buttons, then kept on this phone." else "It stays on this phone."
-        InfoNote("Take the screenshot in the game first. $privacy Without one, you'll place buttons on a blank screen.")
+        // Kept: where the screenshot goes is a privacy promise, not decoration.
+        InfoNote(if (viewModel.autoDetectsButtons) "Sent once to PWDe's server to find the buttons; kept on this phone." else "Stays on this phone.")
     }
 }
 
@@ -256,10 +292,10 @@ internal fun ButtonMappingStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         panelTitle = ui.panelTitle,
         title = "Mark the buttons",
         says = "Tap each game button, or point and say \"place\". Then name it.",
-        voiceHint = "Say \"place\", \"rename\", \"move left\" or \"done\"",
+        voiceHint = "Say \"place\", \"rename\", \"move left\" or \"next\"",
         footer = {
             SideButton(
-                "Done: ${buttons.size} ${if (buttons.size == 1) "button" else "buttons"}",
+                "Next: ${buttons.size} ${if (buttons.size == 1) "button" else "buttons"}",
                 viewModel::buttonsDone,
                 enabled = buttons.isNotEmpty(),
                 icon = Icons.Outlined.CheckCircle,
@@ -468,8 +504,11 @@ private val SELECTED_COLOR = Color(0xFFFFE600)
 internal val TRIGGER_COMMANDS = listOf(
     voiceCommand("type:VOICE", "voice", "voice command"),
     voiceCommand("type:GESTURE", "gesture", "head gesture"),
-    voiceCommand("previous_button", "previous", "back"), // Added
-    voiceCommand("next_button", "next", "next button"),
+    voiceCommand("previous_button", "previous button", "previous"),
+    voiceCommand("next_button", "next button"),
+    // Moves on to testing, like the sidebar's "Next".
+    voiceCommand("next_step", "next"),
+    voiceCommand("done", "done", "done mapping"),
     voiceCommand("close", "close", "cancel"),
     voiceCommand("use_all_suggested", "use all suggested words", "auto map"), // Added
 ) + JoystickDirection.entries.filter { it != JoystickDirection.CENTER }
@@ -516,6 +555,7 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
             id == "hide_controls" -> viewModel.setControlsShown(false)
             id == "hide_panel" -> viewModel.setSidebarOpen(false)
             id == "show_panel" -> viewModel.setSidebarOpen(true)
+            id == "next_step" -> viewModel.triggersDone()
             id == "done" -> if (selected != null) viewModel.openTriggerChooser(null) else viewModel.triggersDone()
         }
     }
@@ -525,7 +565,7 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         panelTitle = ui.panelTitle,
         title = "Choose how to press each button",
         says = if (selected != null) "How to press ${selected.label}?" else "Tap a button or say its name, then choose how to press it.",
-        voiceHint = if (selected != null) "Say \"voice\", \"gesture\", \"joystick\", \"previous\", \"next\" or \"done mapping\""
+        voiceHint = if (selected != null) "Say \"voice\", \"gesture\", \"joystick\", \"previous button\", \"next button\" or \"done\""
         else "Tap Map beside a button, tap it on the game screen, or say its name",
         footer = {
             Row(
@@ -548,7 +588,7 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
                     )
                 }
                 SideButton(
-                    "Done Mapping",
+                    "Next",
                     viewModel::triggersDone,
                     icon = Icons.Outlined.CheckCircle,
                     modifier = Modifier.weight(1f),
@@ -585,7 +625,7 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         }
         SectionTitle("Map or change a button")
         Text(
-            "Choose any row to assign or replace its control. Saved profiles can be edited the same way.",
+            "Choose a row to assign its control.",
             style = MaterialTheme.typography.bodySmall,
             color = PwdeTheme.colors.textMuted,
         )
@@ -769,14 +809,14 @@ private fun TriggerChooser(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 SideButton(
-                    "Previous",
+                    "Previous button",
                     viewModel::previousButtonToAssign,
                     style = ButtonStyle.SECONDARY,
                     icon = Icons.AutoMirrored.Outlined.ArrowBack,
                     modifier = Modifier.weight(1f)
                 )
                 SideButton(
-                    "Next",
+                    "Next button",
                     viewModel::nextButtonToAssign,
                     style = ButtonStyle.SECONDARY,
                     icon = Icons.Outlined.SkipNext,
@@ -793,12 +833,15 @@ private fun TriggerChooser(
 internal fun TestControlsStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     val buttons = ui.form.buttons
     val hit = ui.testHit
+    // The app-wide recognizer can hold the mic here too, so "next" is registered with it as well
+    // as with the test's own listener (TEST_DONE_PHRASES).
+    VoiceCommandsEffect(remember { listOf(voiceCommand("next", "next", "done testing", "finish testing")) }) { viewModel.testingDone() }
 
     GabAiStep(
         viewModel, ui,
         panelTitle = ui.panelTitle,
         title = "Test controls",
-        says = "Try out your controls now! Perform a gesture or say a command to test your mappings.",
+        says = "Try a gesture or say a command to test your controls.",
         voiceHint = "Say a command or tap Next",
         // In AssignTriggersStep footer:
         footer = {
@@ -821,10 +864,16 @@ internal fun TestControlsStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
             StatusPill(it.text, icon = Icons.Outlined.CheckCircle)
         }
         SectionTitle("Mapped controls")
-        buttons.forEach { button ->
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(button.label, style = MaterialTheme.typography.bodyLarge, color = PwdeTheme.colors.text, modifier = Modifier.weight(1f))
-                Text(button.trigger?.describe() ?: "—", style = MaterialTheme.typography.bodyMedium, color = PwdeTheme.colors.primary)
+        // Two per row, trigger under the name, so a full HUD fits without scrolling.
+        buttons.chunked(2).forEach { pair ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                pair.forEach { button ->
+                    Column(Modifier.weight(1f)) {
+                        Text(button.label, style = MaterialTheme.typography.bodyMedium, color = PwdeTheme.colors.text, maxLines = 1)
+                        Text(button.trigger?.shortLabel() ?: "—", style = MaterialTheme.typography.bodySmall, color = PwdeTheme.colors.primary, maxLines = 1)
+                    }
+                }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
@@ -835,30 +884,25 @@ internal fun TestControlsStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
 @Composable
 internal fun NameAndSaveStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     val gameName = gameDisplayName(ui.form.gameId)
-    VoiceCommandsEffect(remember { listOf(voiceCommand("save", "save", "save profile")) }) { viewModel.saveGameProfile() }
+    VoiceCommandsEffect(remember { listOf(voiceCommand("save", "save game profile", "save", "save profile")) }) { viewModel.saveGameProfile() }
     GabAiStep(
         viewModel, ui,
         panelTitle = ui.panelTitle,
         title = "Name and save",
-        says = "All set! Give this ${gameName ?: "game"} profile a name, and I'll save it.",
-        voiceHint = "Say \"save\"",
+        says = "Name this ${gameName ?: "game"} profile and save it.",
+        voiceHint = "Say \"save as\" and a name, e.g. \"save as Fanny\"",
         footer = { PwdeButton("Save game profile", viewModel::saveGameProfile, icon = Icons.Outlined.Save, modifier = Modifier.fillMaxWidth()) },
     ) {
         PwdeTextField("Profile name (optional)", ui.form.profileName, viewModel::setProfileName)
-        SectionTitle("Buttons")
-        ui.form.buttons.forEach { button ->
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(button.label, style = MaterialTheme.typography.bodyLarge, color = PwdeTheme.colors.text, modifier = Modifier.weight(1f))
-                Text(button.trigger?.describe() ?: "—", style = MaterialTheme.typography.bodyMedium, color = PwdeTheme.colors.primary)
-            }
-        }
+        // The button list was just reviewed on Test controls, so it isn't repeated here.
+        Text("${ui.form.buttons.size} buttons mapped", style = MaterialTheme.typography.bodyMedium, color = PwdeTheme.colors.textMuted)
     }
 }
 
 private val SAVED_PROFILE_COMMANDS = listOf(
     voiceCommand("play", "play", "play now"),
     voiceCommand("another", "create another", "another"),
-    voiceCommand("dashboard", "dashboard", "done"),
+    voiceCommand("dashboard", "go to dashboard", "dashboard", "done"),
 )
 
 @Composable
@@ -874,7 +918,7 @@ internal fun ProfileSavedStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         viewModel, ui,
         panelTitle = ui.panelTitle,
         title = "Profile saved",
-        says = "Saved \"${ui.form.profileName}\"! You can edit it any time from your Profile.",
+        says = "Saved \"${ui.form.profileName}\"!",
         voiceHint = "Say \"play now\", \"create another\" or \"dashboard\"",
     ) {
         // An added game isn't supported yet: its mapping is saved, but there's nothing to launch.

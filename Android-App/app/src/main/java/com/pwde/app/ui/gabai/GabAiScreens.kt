@@ -33,7 +33,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.runtime.remember
+import com.pwde.app.data.local.GameProfile
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +49,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pwde.app.data.gabai.Axis
+import com.pwde.app.data.gabai.GabAiFlow
 import com.pwde.app.data.gabai.GabAiState
 import com.pwde.app.data.gabai.JoystickParameter
 import com.pwde.app.data.model.DEFAULT_LEVEL
@@ -110,9 +117,10 @@ fun GabAiScreen(
         }
     }
     if (!ui.loaded) return
-    // From marking the buttons on, the work is on the game's screen: hold the phone the way the game
-    // is played. One call site for all these steps, so moving between them never unlocks and re-locks.
-    if (ui.state.let { it is GabAiState.ButtonMapping || it in GAME_SCREEN_STEPS }) {
+    // From placing buttons to testing them, the work is on the game's screen, so hold the phone the
+    // way the game is played. The lock is released once mapping is done: naming and saving is a form,
+    // and staying in landscape there left the device stuck sideways after the mapping was finished.
+    if (GabAiFlow.locksGameScreenOrientation(ui.state)) {
         LockOrientation(Game.byId(ui.form.gameId)?.landscape ?: true)
     }
     when (val state = ui.state) {
@@ -133,10 +141,6 @@ fun GabAiScreen(
         GabAiState.ProfileSaved -> ProfileSavedStep(viewModel, ui)
     }
 }
-
-private val GAME_SCREEN_STEPS = setOf(
-    GabAiState.AssignTriggers, GabAiState.TestControls, GabAiState.NameAndSaveProfile, GabAiState.ProfileSaved,
-)
 
 /** Shared frame for every GabAI step: GabAI's line on top, then the step's own content. */
 @Composable
@@ -182,16 +186,14 @@ internal fun ReplyHint(hint: String) {
             .fillMaxWidth()
             .clip(PwdeShapes.pill)
             .background(colors.surfaceMuted)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
             .semantics { contentDescription = "You can reply: $hint" },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        // One line: the mic icon already says "you can reply", and screen readers still hear it.
         Icon(Icons.Outlined.Mic, contentDescription = null, tint = colors.primary)
-        Column(Modifier.weight(1f)) {
-            Text("You can reply", style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
-            Text(hint, style = MaterialTheme.typography.bodyMedium, color = colors.text)
-        }
+        Text(hint, style = MaterialTheme.typography.bodyMedium, color = colors.text, modifier = Modifier.weight(1f))
     }
 }
 
@@ -200,7 +202,7 @@ internal fun GabAiSays(text: String, compact: Boolean = false) {
     val colors = PwdeTheme.colors
     GradientCard(Modifier.fillMaxWidth(), contentPadding = if (compact) 10.dp else PwdeTheme.spacing.internal) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp)) {
-            IconBadge(Icons.Outlined.AutoAwesome, tint = colors.secondary, size = if (compact) 28.dp else 44.dp)
+            IconBadge(Icons.Outlined.AutoAwesome, tint = colors.secondary, size = if (compact) 28.dp else 36.dp)
             Text(
                 text,
                 style = if (compact) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyLarge,
@@ -214,8 +216,8 @@ internal fun GabAiSays(text: String, compact: Boolean = false) {
 // ---------------- Welcome ----------------
 
 private val WELCOME_COMMANDS = listOf(
-    voiceCommand("calibration", "new calibration", "calibration"),
-    voiceCommand("game", "new game", "game profile"),
+    voiceCommand("calibration", "new calibration profile", "new calibration", "calibration"),
+    voiceCommand("game", "new game profile", "new game", "game profile"),
     voiceCommand("continue", "continue", "continue existing"),
 ) + MainTab.entries.filter { it != MainTab.GABAI }.map { voiceCommand("tab:${it.name}", it.label) }
 
@@ -234,7 +236,7 @@ private fun WelcomeStep(viewModel: GabAiViewModel, ui: GabAiUiState, onTab: (Mai
         viewModel, ui,
         panelTitle = ui.panelTitle,
         title = "Welcome",
-        says = "Hi, I'm GabAI! I'll walk you through setting up PWDe one small step at a time. What would you like to do?",
+        says = "Hi, I'm GabAI! What would you like to set up?",
         voiceHint = "Say \"new calibration\", \"new game\" or \"continue\"",
         bottomBar = { PwdeBottomNav(MainTab.GABAI, onTab) },
     ) {
@@ -244,16 +246,30 @@ private fun WelcomeStep(viewModel: GabAiViewModel, ui: GabAiUiState, onTab: (Mai
         if (resumable != null) {
             NavCard("Continue Existing", "Pick up where you left off: ${resumable.state.summary}", Icons.Outlined.History, viewModel::resume)
         } else {
-            InfoNote("Nothing unfinished to continue. Anything you start is saved step by step, so you can always come back to it.")
+            InfoNote("Nothing unfinished to continue.")
         }
         if (gameProfiles.isNotEmpty()) {
-            SectionTitle("Edit a saved game profile")
-            gameProfiles.forEach { profile ->
+            var showAll by rememberSaveable { mutableStateOf(false) }
+            val newestFirst = remember(gameProfiles) { gameProfiles.sortedWith(compareByDescending<GameProfile> { it.createdAt }.thenByDescending { it.id }) }
+            SectionTitle(if (showAll) "Edit a saved game profile" else "Edit a recent game profile")
+            (if (showAll) newestFirst else newestFirst.take(RECENT_GAME_PROFILES)).forEach { profile ->
                 NavCard(profile.profileName, profile.gameName, Icons.Outlined.SportsEsports, { viewModel.editGameProfile(profile.id) })
+            }
+            if (gameProfiles.size > RECENT_GAME_PROFILES) {
+                PwdeButton(
+                    if (showAll) "Show recent only" else "Show all ${gameProfiles.size} profiles",
+                    { showAll = !showAll },
+                    style = ButtonStyle.SECONDARY,
+                    icon = if (showAll) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
 }
+
+/** How many of the newest game profiles GabAI lists before "Show all". */
+private const val RECENT_GAME_PROFILES = 3
 
 // ---------------- Calibration branch ----------------
 
@@ -265,11 +281,11 @@ private val STEP_COMMANDS = listOf(
 )
 
 private fun axisSays(axis: Axis) = when (axis) {
-    Axis.UP -> "Look up to move the pointer onto the top target. Change the speed until it feels comfortable."
+    Axis.UP -> "Look up to reach the top target. Adjust the speed to feel comfortable."
     Axis.DOWN -> "Now look down to reach the bottom target."
     Axis.LEFT -> "Turn your head left to reach the left target."
     Axis.RIGHT -> "And right, to the right target."
-    Axis.DIAGONAL -> "Last one: move to a corner target. If the pointer shakes, add smoothing; if it lags, take some away."
+    Axis.DIAGONAL -> "Last one: reach a corner. Shaky? Add smoothing. Laggy? Reduce it."
 }
 
 @Composable
@@ -357,8 +373,8 @@ private fun joystickStepCommands(parameter: JoystickParameter) = when (parameter
 )
 
 private fun joystickSays(parameter: JoystickParameter) = when (parameter) {
-    JoystickParameter.SENSITIVITY -> "Tilt your head around and adjust sensitivity until the joystick reaches the outer ring at a comfortable pace."
-    JoystickParameter.DEAD_ZONE -> "Adjust the dead zone until small head movements are ignored, but steering still feels responsive."
+    JoystickParameter.SENSITIVITY -> "Tilt your head. Adjust until the stick reaches the outer ring comfortably."
+    JoystickParameter.DEAD_ZONE -> "Adjust until small head movements are ignored but steering still responds."
 }
 
 private fun joystickVoiceHint(parameter: JoystickParameter) = when (parameter) {
@@ -461,7 +477,7 @@ private fun VoiceStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         viewModel, ui,
         panelTitle = ui.panelTitle,
         title = "Calibration: Voice",
-        says = "Now, voice. Choose how strictly I match your words and when I act on them. Then we'll try some face gestures.",
+        says = "Now, voice: how strictly I match your words, and when I act.",
         voiceHint = "Say \"word anywhere\", \"right away\" or \"next\"",
         footer = { PwdeButton("Next", viewModel::voiceDone, icon = Icons.AutoMirrored.Outlined.ArrowForward, modifier = Modifier.fillMaxWidth()) },
     ) {
@@ -528,7 +544,7 @@ private fun GestureTestStep(viewModel: GabAiViewModel, ui: GabAiUiState, test: G
         panelTitle = ui.panelTitle,
         title = "Gesture: ${gesture.label}",
         says = if (passed) "Got it! ${gesture.label} is on."
-        else "${gesture.description}. Can't do it comfortably? Skip it — I'll only turn on the gestures you can do.",
+        else "${gesture.description}. Can't do it? Skip it.",
         voiceHint = "Say \"skip\", \"more sensitive\", \"less sensitive\", or a sensitivity level from 1 to 10",
         footer = {
             PwdeButton(
@@ -548,10 +564,10 @@ private fun GestureTestStep(viewModel: GabAiViewModel, ui: GabAiUiState, test: G
                 when {
                     passed -> "Detected! This gesture is on."
                     face.isGyro && measure == null ->
-                        "With a gyro joystick, the phone's tilt steers: head tilt, nod and shake are off (skip those), and face expressions need your face in view."
+                        "Gyro joystick: skip head tilt, nod and shake."
                     face.isSimulated && measure == null -> "Demo mode can only simulate tilt, nod and shake — skip this one."
                     !face.hasFace -> "Face the camera to try it."
-                    else -> "Do the move — the bar passes the white tick when PWDe sees it. Too hard? Raise the sensitivity."
+                    else -> "Do the move until the bar passes the tick. Too hard? Raise sensitivity."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (passed) colors.primary else colors.textMuted,
@@ -580,8 +596,8 @@ private fun FacialGesture.unit() = when (this) {
 }
 
 private val GESTURE_REVIEW_COMMANDS = listOf(
-    voiceCommand("save", "save", "save profile"),
-    voiceCommand("retry", "try again", "retry"),
+    voiceCommand("save", "save calibration profile", "save", "save profile"),
+    voiceCommand("retry", "try the missed ones again", "try again", "retry"),
 )
 
 @Composable
@@ -597,11 +613,11 @@ private fun GestureReviewStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         panelTitle = ui.panelTitle,
         title = "Calibration: Gestures",
         says = when {
-            on.isEmpty() -> "No gestures are on this time, and that's fine — everything else still works. "
-            missed.isEmpty() -> "You did every gesture, so they're all on! "
-            else -> "You did ${on.size} of ${tests.size} gestures. Only those are on, so the others can't fire by accident. "
-        } + "Give this profile a name and save it.",
-        voiceHint = "Say \"name it\" + a name, " + if (missed.isEmpty()) "then \"save\"" else "\"try again\" or \"save\"",
+            on.isEmpty() -> "No gestures are on — everything else still works. "
+            missed.isEmpty() -> "Every gesture is on! "
+            else -> "${on.size} of ${tests.size} gestures are on. "
+        } + "Name it and save.",
+        voiceHint = "Say \"save as\" + a name" + if (missed.isEmpty()) "" else ", or \"try again\"",
         footer = { PwdeButton("Save calibration profile", viewModel::saveCalibration, icon = Icons.Outlined.Save, modifier = Modifier.fillMaxWidth()) },
     ) {
         SectionTitle("On (${on.size})")
@@ -617,7 +633,7 @@ private fun GestureReviewStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
 
 private val SAVED_COMMANDS = listOf(
     voiceCommand("done", "done", "finish"),
-    voiceCommand("game", "set up a game", "game profile", "continue"),
+    voiceCommand("game", "next", "set up a game with it", "set up a game", "game profile", "continue"),
 )
 
 @Composable
@@ -628,12 +644,12 @@ private fun CalibrationSavedStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         viewModel, ui,
         panelTitle = ui.panelTitle,
         title = "Calibration saved",
-        says = "Saved \"${ui.form.calibrationName}\"! It's your active setup now. " +
+        says = "Saved \"${ui.form.calibrationName}\"! It's active now. " +
                 if (nextGame) "Let's carry on with your game." else "Want to set up a game with it?",
-        voiceHint = "Say \"set up a game\" or \"done\"",
+        voiceHint = if (nextGame) "Say \"next\" or \"done\"" else "Say \"set up a game\" or \"done\"",
     ) {
         PwdeButton(
-            if (nextGame) "Continue to the game profile" else "Set up a game with it",
+            if (nextGame) "Next" else "Set up a game with it",
             viewModel::continueToGame,
             icon = Icons.Outlined.SportsEsports,
             modifier = Modifier.fillMaxWidth(),

@@ -63,6 +63,11 @@ sealed interface GameCommand {
     /** List every mapped button with what presses it, over the game. */
     object ShowControls : GameCommand
     object HideControls : GameCommand
+    /**
+     * Swap to another of this game's profiles (buttons, triggers and calibration) without leaving
+     * the game: [profileId], or the next one in turn when null.
+     */
+    data class SwitchProfile(val profileId: Long?) : GameCommand
 
     /** Nothing to do; [reason] is shown to the user. */
     data class Ignored(val reason: String) : GameCommand
@@ -106,7 +111,9 @@ object GameInput {
     const val HEAD_TRACKING = "game_head_tracking"
     const val GAME_MODE = "game_mode"
     const val NAVIGATION_MODE = "game_navigation_mode"
+    const val NEXT_PROFILE = "game_next_profile"
     private const val SCROLL = "game_scroll:"
+    private const val PROFILE = "game_profile:"
 
     /**
      * The phone's own navigation: these drive the phone, not the game. Back / Home / Notifications /
@@ -118,6 +125,13 @@ object GameInput {
     )
 
     fun buttonCommandId(buttonId: Int) = "button:$buttonId"
+
+    /**
+     * "profile <name>" for each of the game's other profiles, so the user can name the one they
+     * want. The prefix keeps a profile name from colliding with a button's own phrase.
+     */
+    fun profileBindings(profiles: List<Pair<Long, String>>): List<VoiceCommandBinding> =
+        profiles.map { (id, name) -> VoiceCommandBinding(PROFILE + id, listOf("profile $name")) }
 
     /** Also used by GabAI's mapping and test steps, so the phrase works the same everywhere. */
     val SHOW_CONTROLS_PHRASES = listOf("show controls", "show buttons", "list controls")
@@ -132,7 +146,7 @@ object GameInput {
         // "menu" or "exit" is too easy for the game's own music and voice lines to trip.
         VoiceCommandBinding(MENU, listOf("pwde menu")),
         VoiceCommandBinding(RESUME, listOf("resume", "continue game", "unpause")),
-        VoiceCommandBinding(EXIT, listOf("exit game", "quit game", "exit to pwde", "stop pwde")),
+        VoiceCommandBinding(EXIT, listOf("exit game", "quit game", "exit to pwde", "stop pwde", "back to dashboard", "go to dashboard", "open dashboard")),
         VoiceCommandBinding(SELECT, listOf("select", "tap", "click")),
         VoiceCommandBinding(RECENTER, listOf("recenter", "center", "recenter joystick", "center joystick")),
         // The centre lock is a GESTURE (GestureAction.LOCK_CENTER -> ToggleCenterLock) and deliberately
@@ -159,6 +173,7 @@ object GameInput {
         VoiceCommandBinding(HEAD_TRACKING, listOf("head tracking", "head joystick")),
         VoiceCommandBinding(GAME_MODE, listOf("game mode")),
         VoiceCommandBinding(NAVIGATION_MODE, listOf("navigation mode")),
+        VoiceCommandBinding(NEXT_PROFILE, listOf("next profile", "switch profile")),
     ) + ScrollDirection.entries.map { VoiceCommandBinding(SCROLL + it.name, listOf("scroll ${it.name.lowercase()}")) }
 
     /** The standard commands plus each button's own voice trigger. */
@@ -195,7 +210,8 @@ object GameInput {
         HEAD_TRACKING -> GameCommand.HeadTracking
         GAME_MODE -> GameCommand.GameMode
         NAVIGATION_MODE -> GameCommand.NavigationMode
-        else -> ScrollDirection.entries.firstOrNull { commandId == SCROLL + it.name }?.let { GameCommand.Scroll(it) } ?: buttons.firstOrNull { buttonCommandId(it.id) == commandId }?.let { GameCommand.Press(it) }
+        NEXT_PROFILE -> GameCommand.SwitchProfile(null)
+        else -> if (commandId.startsWith(PROFILE)) commandId.removePrefix(PROFILE).toLongOrNull()?.let { GameCommand.SwitchProfile(it) } else ScrollDirection.entries.firstOrNull { commandId == SCROLL + it.name }?.let { GameCommand.Scroll(it) } ?: buttons.firstOrNull { buttonCommandId(it.id) == commandId }?.let { GameCommand.Press(it) }
     }
 
     /** A game button mapped to this gesture wins over the general gesture actions. */
@@ -256,12 +272,16 @@ object GameInput {
         GameCommand.HideOverlay, GameCommand.ShowOverlay, GameCommand.ShowControls, GameCommand.HideControls, GameCommand.CursorMode, GameCommand.JoystickMode,
         GameCommand.GyroMode, GameCommand.HeadTracking,
         GameCommand.GameMode, GameCommand.NavigationMode,
+        is GameCommand.SwitchProfile,
         GameCommand.Drop, is GameCommand.Ignored -> true
         else -> false
     }
 
-    /** True for the commands that steer the phone rather than the game. */
-    fun isNavigationCommand(command: GameCommand): Boolean = command in NAVIGATION_COMMANDS
+    /**
+     * True for the commands that steer the phone rather than the game, and for profile switching,
+     * which can swap every button (or leave the game) mid-match — so game mode keeps both out.
+     */
+    fun isNavigationCommand(command: GameCommand): Boolean = command in NAVIGATION_COMMANDS || command is GameCommand.SwitchProfile
 
     /**
      * Why the center lock is refused in [outputMode], or null when it may run. The lock brakes the
@@ -287,6 +307,7 @@ object GameInput {
         GameCommand.Recents -> "Recent apps"
         GameCommand.Notifications -> "Notifications"
         GameCommand.AllApps -> "All apps"
+        is GameCommand.SwitchProfile -> "Switch profile"
         else -> "That"
     }
 

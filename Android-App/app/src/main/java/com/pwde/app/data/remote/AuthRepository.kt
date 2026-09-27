@@ -44,12 +44,15 @@ interface AuthRepository {
 
         /** Uses Firebase when a config is present (google-services resources or local.properties). */
         fun create(context: Context): AuthRepository {
-            val app = runCatching { initFirebase(context) }
-                .onFailure { Log.w(TAG, "Firebase init failed; running guest-only", it) }
-                .getOrNull()
+            val app = firebaseApp(context)
             return if (app != null) FirebaseAuthRepository(FirebaseAuth.getInstance(app))
             else GuestOnlyAuthRepository()
         }
+
+        /** The configured Firebase app (initialized on first call), or null when this build has none. */
+        fun firebaseApp(context: Context): FirebaseApp? = runCatching { initFirebase(context) }
+            .onFailure { Log.w(TAG, "Firebase init failed; running guest-only", it) }
+            .getOrNull()
 
         private fun initFirebase(context: Context): FirebaseApp? {
             FirebaseApp.getApps(context).firstOrNull()?.let { return it }

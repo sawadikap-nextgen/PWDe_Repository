@@ -163,7 +163,7 @@ private val VOICE_CONFIG_COMMANDS = listOf(
     voiceCommand("anywhere", "word anywhere", "anywhere"),
     voiceCommand("immediate", "right away"),
     voiceCommand("after", "after I finish", "after finish"),
-    voiceCommand("next_page", "next page", "commands"),
+    voiceCommand("next_page", "next", "next page", "commands"),
     voiceCommand("previous_page", "previous page", "previous"),
     voiceCommand("all_commands", "all commands", "all voice commands"),
 )
@@ -199,7 +199,7 @@ fun VoiceConfigScreen(viewModel: VoiceConfigViewModel, onBack: () -> Unit) {
     }
     PwdeScreen(
         title = "Voice",
-        subtitle = "Say a button's name to press it. Changes save automatically.",
+        subtitle = "Say a button's name to press it.",
         onBack = onBack,
         voiceHint = "Say \"word anywhere\", \"right away\" or \"all commands\"",
         footer = { Pager(page, PAGE_COUNT, { page-- }, { page++ }) },
@@ -230,7 +230,7 @@ fun VoiceConfigScreen(viewModel: VoiceConfigViewModel, onBack: () -> Unit) {
             SectionTitle("Read aloud")
             SwitchRow(
                 title = "Read the screen to me",
-                description = "Speaks what is on the screen — labels, values and buttons — with your phone's text-to-speech voice",
+                description = "Reads the screen aloud",
                 checked = readAloud.enabled,
                 onCheckedChange = viewModel::setReadAloud,
                 icon = Icons.AutoMirrored.Outlined.VolumeUp,
@@ -245,7 +245,7 @@ fun VoiceConfigScreen(viewModel: VoiceConfigViewModel, onBack: () -> Unit) {
                     label = { it.label },
                     onSelect = viewModel::setReadAloudSpeed,
                 )
-                InfoNote("Say \"read screen\" to hear the current screen again. Leave this off if TalkBack is reading for you.")
+                InfoNote("Say \"read screen\" to hear it again. Leave off with TalkBack.")
             }
         } else if (page == 2) {
             SectionTitle("Your spoken shortcuts")
@@ -263,7 +263,7 @@ fun VoiceConfigScreen(viewModel: VoiceConfigViewModel, onBack: () -> Unit) {
                 SectionTitle("On this screen")
                 CommandList(screenCommands.map { it.phrases.joinToString(" / ") })
             }
-            InfoNote("Every screen adds its own commands — usually the words on its buttons and cards. See them all on the next page.")
+            InfoNote("Each screen also answers to the words on its buttons.")
         } else {
             SectionTitle("All voice commands")
             val shortcuts = StandardCommands.shortcuts(phrases.orEmpty())

@@ -69,6 +69,20 @@ object GabAiFlow {
 
     fun createAnother(): GabAiState = GabAiState.ChooseGame
 
+    /**
+     * True while GabAI is working on the game's own screen, so the phone is held the way the game is
+     * played: placing the buttons and choosing how each is pressed.
+     *
+     * The lock is **released** from Done Mapping on ([GabAiState.TestControls],
+     * [GabAiState.NameAndSaveProfile] and [GabAiState.ProfileSaved] return false), and the screen
+     * returns to portrait. Mapping being finished is the point the user is done placing buttons on the
+     * game screen, and holding the whole app in landscape past that left the device stuck sideways.
+     */
+    fun locksGameScreenOrientation(state: GabAiState): Boolean = when (state) {
+        is GabAiState.ButtonMapping, GabAiState.AssignTriggers -> true
+        else -> false
+    }
+
     /** One step back, or null to leave GabAI from the Welcome screen. */
     fun back(state: GabAiState, form: GabAiForm): GabAiState? = when (state) {
         GabAiState.Welcome -> null

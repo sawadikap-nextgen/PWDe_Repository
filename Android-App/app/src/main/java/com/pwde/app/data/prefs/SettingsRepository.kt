@@ -1,9 +1,11 @@
 package com.pwde.app.data.prefs
 
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.pwde.app.data.model.JoystickSource
@@ -26,10 +28,18 @@ interface SettingsRepository {
     suspend fun setScreenReading(enabled: Boolean, speed: TtsSpeed, usesOtherScreenReader: Boolean)
     suspend fun setSetupCompleted(completed: Boolean)
     suspend fun setVoiceTutorialCompleted(completed: Boolean)
+
+    /**
+     * Cloud sync: replaces the synced settings with [settings] and stamps [UserSettings.updatedAt] with
+     * its value. Device-only settings ([UserSettings.pwdeEnabled], [UserSettings.usesOtherScreenReader])
+     * are left alone.
+     */
+    suspend fun applySynced(settings: UserSettings) = Unit
 }
 
 class DataStoreSettingsRepository(
     private val dataStore: DataStore<Preferences>,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : SettingsRepository {
 
     override val settings: Flow<UserSettings> = dataStore.data
@@ -37,7 +47,7 @@ class DataStoreSettingsRepository(
         .distinctUntilChanged()
 
     override suspend fun setAccessibilityNeeds(needs: Set<AccessibilityNeed>) {
-        dataStore.edit { it[Keys.NEEDS] = needs.map { need -> need.name }.toSet() }
+        editSynced { it[Keys.NEEDS] = needs.map { need -> need.name }.toSet() }
     }
 
     override suspend fun setAppearance(
@@ -45,7 +55,7 @@ class DataStoreSettingsRepository(
         textSize: TextSizeOption,
         layoutMode: LayoutMode,
     ) {
-        dataStore.edit {
+        editSynced {
             it[Keys.COLOR_SCHEME] = colorScheme.name
             it[Keys.TEXT_SIZE] = textSize.name
             it[Keys.LAYOUT_MODE] = layoutMode.name
@@ -53,11 +63,11 @@ class DataStoreSettingsRepository(
     }
 
     override suspend fun setInputMode(mode: InputMode) {
-        dataStore.edit { it[Keys.INPUT_MODE] = mode.name }
+        editSynced { it[Keys.INPUT_MODE] = mode.name }
     }
 
     override suspend fun setJoystickSource(source: JoystickSource) {
-        dataStore.edit { it[Keys.JOYSTICK_SOURCE] = source.name }
+        editSynced { it[Keys.JOYSTICK_SOURCE] = source.name }
     }
 
     override suspend fun setPwdeEnabled(enabled: Boolean) {
@@ -65,7 +75,7 @@ class DataStoreSettingsRepository(
     }
 
     override suspend fun setScreenReading(enabled: Boolean, speed: TtsSpeed, usesOtherScreenReader: Boolean) {
-        dataStore.edit {
+        editSynced {
             it[Keys.TTS_ENABLED] = enabled
             it[Keys.TTS_SPEED] = speed.name
             it[Keys.OTHER_SCREEN_READER] = usesOtherScreenReader
@@ -73,11 +83,35 @@ class DataStoreSettingsRepository(
     }
 
     override suspend fun setSetupCompleted(completed: Boolean) {
-        dataStore.edit { it[Keys.SETUP_DONE] = completed }
+        editSynced { it[Keys.SETUP_DONE] = completed }
     }
 
     override suspend fun setVoiceTutorialCompleted(completed: Boolean) {
-        dataStore.edit { it[Keys.TUTORIAL_DONE] = completed }
+        editSynced { it[Keys.TUTORIAL_DONE] = completed }
+    }
+
+    override suspend fun applySynced(settings: UserSettings) {
+        dataStore.edit {
+            it[Keys.NEEDS] = settings.accessibilityNeeds.map { need -> need.name }.toSet()
+            it[Keys.COLOR_SCHEME] = settings.colorScheme.name
+            it[Keys.TEXT_SIZE] = settings.textSize.name
+            it[Keys.LAYOUT_MODE] = settings.layoutMode.name
+            it[Keys.INPUT_MODE] = settings.inputMode.name
+            it[Keys.JOYSTICK_SOURCE] = settings.joystickSource.name
+            it[Keys.TTS_ENABLED] = settings.ttsEnabled
+            it[Keys.TTS_SPEED] = settings.ttsSpeed.name
+            it[Keys.SETUP_DONE] = settings.setupCompleted
+            it[Keys.TUTORIAL_DONE] = settings.voiceTutorialCompleted
+            it[Keys.UPDATED_AT] = settings.updatedAt
+        }
+    }
+
+    /** An edit to settings that sync across devices: stamps when they last changed. */
+    private suspend fun editSynced(transform: (MutablePreferences) -> Unit) {
+        dataStore.edit {
+            transform(it)
+            it[Keys.UPDATED_AT] = clock()
+        }
     }
 
     private object Keys {
@@ -93,6 +127,7 @@ class DataStoreSettingsRepository(
         val OTHER_SCREEN_READER = booleanPreferencesKey("other_screen_reader")
         val SETUP_DONE = booleanPreferencesKey("setup_completed")
         val TUTORIAL_DONE = booleanPreferencesKey("voice_tutorial_completed")
+        val UPDATED_AT = longPreferencesKey("synced_settings_updated_at")
     }
 
     private fun Preferences.toUserSettings(): UserSettings {
@@ -111,6 +146,7 @@ class DataStoreSettingsRepository(
             usesOtherScreenReader = this[Keys.OTHER_SCREEN_READER] ?: defaults.usesOtherScreenReader,
             setupCompleted = this[Keys.SETUP_DONE] ?: defaults.setupCompleted,
             voiceTutorialCompleted = this[Keys.TUTORIAL_DONE] ?: defaults.voiceTutorialCompleted,
+            updatedAt = this[Keys.UPDATED_AT] ?: defaults.updatedAt,
         )
     }
 }

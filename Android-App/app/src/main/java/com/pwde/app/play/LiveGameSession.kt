@@ -10,6 +10,7 @@ import com.pwde.app.data.model.FaceOutputMode
 import com.pwde.app.data.model.FacialGesture
 import com.pwde.app.data.model.Game
 import com.pwde.app.data.model.JoystickSource
+import com.pwde.app.data.model.MappedButton
 import com.pwde.app.data.model.NavigationMode
 import com.pwde.app.data.prefs.SettingsRepository
 import com.pwde.app.sensors.face.FaceTrackingManager
@@ -39,6 +40,8 @@ class LiveGameSession(
     private val settingsRepository: SettingsRepository,
     /** The user asked to leave the game ("exit", or an Exit gesture). */
     private val onExit: () -> Unit,
+    /** "profile <name>" named another game's profile: open that game and play it with that profile. */
+    private val onPlayOtherGame: (Game, Long) -> Unit,
 ) {
     private var config = ControlConfig()
     private var lastDirection = JoystickDirection.CENTER
@@ -50,7 +53,13 @@ class LiveGameSession(
     /** Hides the "show controls" labels again; restarted by every "show controls". */
     private var controlsTimeout: Job? = null
 
+    /** The game profile in use; changed by "next profile" / "profile <name>". */
+    private var profileId: Long? = null
+    private var game: Game? = null
+
     suspend fun run(game: Game, profileId: Long?) {
+        this.game = game
+        this.profileId = profileId
         val profile = profileId?.let { profileRepository.getGameProfile(it) }
         if (profile != null) applyProfileCalibration(profile, profileRepository, controlsRepository, settingsRepository)
         val buttons = profile?.let { ControlJson.decodeButtons(it.buttonMappingsJson) }.orEmpty()
@@ -63,7 +72,7 @@ class LiveGameSession(
                 voiceModel = voiceEngine.modelLabel.substringBefore(" ·"),
             )
         }
-        voiceEngine.loadCommands(GameInput.bindings(buttons))
+        loadVoiceCommands(buttons)
         voiceEngine.start()
         try {
             coroutineScope {
@@ -175,7 +184,7 @@ class LiveGameSession(
             GameCommand.Recenter -> recenterForMode()
             GameCommand.ToggleCenterLock -> setCenterLock(!livePlay.state.value.centerLocked)
             is GameCommand.CenterLock -> setCenterLock(command.locked)
-            GameCommand.Exit -> onExit()
+            GameCommand.Exit -> returnToPwde()
             GameCommand.HideOverlay -> livePlay.update { it.copy(overlayHidden = true) }
             GameCommand.ShowOverlay -> livePlay.update { it.copy(overlayHidden = false) }
             GameCommand.ShowControls -> showControls()
@@ -198,6 +207,7 @@ class LiveGameSession(
             GameCommand.HeadTracking -> switchJoystickSource(JoystickSource.HEAD)
             GameCommand.GameMode -> setNavigationMode(NavigationMode.GAME)
             GameCommand.NavigationMode -> setNavigationMode(NavigationMode.NAVIGATION)
+            is GameCommand.SwitchProfile -> scope?.launch { switchGameProfile(command.profileId) }
             GameCommand.StartDrag -> {
                 livePlay.update { it.copy(dragging = true) }
                 livePlay.perform(command)
@@ -212,6 +222,15 @@ class LiveGameSession(
             GameCommand.ToggleDrag -> execute(GameInput.resolveDrag(command, livePlay.state.value.dragging))
             GameCommand.Select, GameCommand.TouchHold, GameCommand.Back, GameCommand.Home,
             GameCommand.Notifications, GameCommand.AllApps, GameCommand.Recents, is GameCommand.Scroll -> livePlay.perform(command)
+        }
+    }
+
+    /** PWDe's own screens are driven with the pointer, so it always comes back in cursor mode. */
+    private fun returnToPwde() {
+        val s = scope ?: return onExit()
+        s.launch {
+            settingsRepository.setInputMode(InputMode.HEAD_FACE)
+            onExit()
         }
     }
 
@@ -304,6 +323,53 @@ class LiveGameSession(
                 "Navigation mode — \"back\", \"home\", \"recent apps\" and \"notifications\" work again."
             },
         )
+    }
+
+    /**
+     * The standard commands, this profile's buttons, and a "profile <name>" for every other profile —
+     * other games' too, which open that game. Only games PWDe can launch are offered.
+     */
+    private suspend fun loadVoiceCommands(buttons: List<MappedButton>) {
+        val others = profileRepository.allGameProfiles()
+            .filter { it.id != profileId && Game.byId(it.gameId) != null }
+            .map { it.id to it.profileName }
+        voiceEngine.loadCommands(GameInput.bindings(buttons) + GameInput.profileBindings(others))
+    }
+
+    /**
+     * Swaps the live buttons, their triggers and the profile's calibration in place, so the user can
+     * change hero mid-session without opening PWDe. [targetId] null means the next profile in turn.
+     */
+    private suspend fun switchGameProfile(targetId: Long?) {
+        val gameId = game?.id ?: return
+        if (targetId != null) {
+            val target = profileRepository.getGameProfile(targetId) ?: return message("That profile no longer exists")
+            if (target.gameId != gameId) {
+                val other = Game.byId(target.gameId) ?: return message("PWDe can't open ${target.gameName}")
+                message("Opening ${other.displayName} with \"${target.profileName}\"")
+                // Starts a fresh session for that game, which ends this one.
+                return onPlayOtherGame(other, target.id)
+            }
+        }
+        val profiles = profileRepository.gameProfilesFor(gameId).first()
+        val next = if (targetId != null) {
+            profiles.firstOrNull { it.id == targetId }
+        } else {
+            val index = profiles.indexOfFirst { it.id == profileId }
+            profiles.getOrNull((index + 1) % profiles.size.coerceAtLeast(1))
+        }
+        if (next == null || profiles.size < 2 && next.id == profileId) {
+            return message("No other profile for this game — make one in GabAI")
+        }
+        if (next.id == profileId) return message("Already using \"${next.profileName}\"")
+        profileId = next.id
+        applyProfileCalibration(next, profileRepository, controlsRepository, settingsRepository)
+        val buttons = ControlJson.decodeButtons(next.buttonMappingsJson)
+        hideControls()
+        livePlay.update { it.copy(profileName = next.profileName, buttons = buttons, centerLocked = false) }
+        loadVoiceCommands(buttons)
+        profileRepository.markGameProfilePlayed(next.id)
+        message("Switched to \"${next.profileName}\" · ${buttons.size} button${if (buttons.size == 1) "" else "s"}")
     }
 
     private suspend fun switchCalibrationProfile() {

@@ -93,7 +93,7 @@ fun WatchTutorialScreen(viewModel: WatchTutorialViewModel, onBack: () -> Unit) {
 
     PwdeScreen(
         title = "Watch Tutorial",
-        subtitle = "A short guide to playing with PWDe.",
+        subtitle = null,
         onBack = onBack,
         voiceHint = "Say \"play\", \"pause\" or \"back 10\"",
         footer = {
@@ -139,7 +139,7 @@ fun WatchTutorialScreen(viewModel: WatchTutorialViewModel, onBack: () -> Unit) {
             Text(formatTime(state.positionMs), style = MaterialTheme.typography.labelMedium, color = colors.text, modifier = Modifier.weight(1f))
             Text(formatTime(state.durationMs), style = MaterialTheme.typography.labelMedium, color = colors.textMuted)
         }
-        InfoNote("This is a placeholder video. The full captioned tutorial will replace it in a later update.")
+        InfoNote("Placeholder video — the full tutorial is coming.")
     }
 }
 

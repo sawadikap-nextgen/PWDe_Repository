@@ -24,6 +24,9 @@ interface CustomGamesRepository {
     /** Adds [name] (trimmed). Returns false, adding nothing, if it's blank or already a game. */
     suspend fun add(name: String): Boolean
 
+    /** Cloud sync: adds each of [names] not already here. Added games are never removed, so a union merges. */
+    suspend fun addAll(names: List<String>) = names.forEach { add(it) }
+
     /** Keeps added games in memory only; the default where nothing is persisted (tests, previews). */
     class InMemory : CustomGamesRepository {
         private val list = MutableStateFlow<List<String>>(emptyList())

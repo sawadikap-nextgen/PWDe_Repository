@@ -249,4 +249,16 @@ class GameInputTest {
         assertFalse(GameInput.needsPointer(GameCommand.ToggleCenterLock))
         assertFalse(GameInput.needsPointer(GameCommand.CenterLock(true)))
     }
+
+    @Test
+    fun profileCommandsSwitchTheGameProfile() {
+        assertEquals(GameCommand.SwitchProfile(null), GameInput.fromVoice(GameInput.NEXT_PROFILE, "next profile", emptyList()))
+        val binding = GameInput.profileBindings(listOf(7L to "Fanny")).single()
+        assertEquals(listOf("profile Fanny"), binding.phrases)
+        assertEquals(GameCommand.SwitchProfile(7L), GameInput.fromVoice(binding.commandId, "profile fanny", emptyList()))
+        assertTrue(GameInput.worksWhilePaused(GameCommand.SwitchProfile(null)))
+        assertNotNull(GameInput.navigationRefusal(GameCommand.SwitchProfile(null), NavigationMode.GAME))
+        assertNull(GameInput.navigationRefusal(GameCommand.SwitchProfile(null), NavigationMode.NAVIGATION))
+        assertEquals(GameCommand.Exit, GameInput.fromVoice(GameInput.EXIT, "back to dashboard", emptyList()))
+    }
 }

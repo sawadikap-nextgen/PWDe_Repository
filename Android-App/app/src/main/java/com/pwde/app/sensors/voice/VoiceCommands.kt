@@ -78,14 +78,26 @@ object Dictation {
     val PREFIXES = listOf("assign", "use", "assigned", "a sign" , "name it", "call it")
     val RETRY = listOf("retry", "reassign", "try again")
 
+    /** "save as <name>": name what's being saved and save it in one go. Bare "save" saves as is. */
+    const val SAVE_AS = "save as"
+
+    /** "save profile", "save game profile"…: the button's own words, not a name. */
+    private val SAVE_BUTTON_WORDS = setOf("profile", "game profile", "calibration profile", "calibration", "it")
+
     sealed interface Parsed {
         data class Assign(val words: String) : Parsed
         object Retry : Parsed
+        /** [name] is null for a bare "save". */
+        data class SaveAs(val name: String?) : Parsed
     }
 
     fun parse(text: String): Parsed? {
         val heard = CommandMatcher.normalize(text)
         if (heard in RETRY) return Parsed.Retry
+        if (heard == "save" || heard.startsWith("save ")) {
+            val rest = heard.removePrefix("save").trim().removePrefix("as").trim()
+            return Parsed.SaveAs(rest.takeUnless { it.isEmpty() || it in SAVE_BUTTON_WORDS })
+        }
         val prefix = PREFIXES.firstOrNull { heard.startsWith("$it ") } ?: return null
         return heard.removePrefix(prefix).trim().takeIf { it.isNotEmpty() }?.let(Parsed::Assign)
     }
@@ -96,6 +108,11 @@ object Dictation {
      */
     fun isAssignment(text: String): Boolean {
         val heard = CommandMatcher.normalize(text)
+        // A bare "save" is held too: it may still grow into "save as <name>", and saving on the
+        // partial would save before the name arrives. Its final transcript saves via [parse].
+        // Any "save…" is held until it's finished: partials arrive as "save", "save a", "save as fa…",
+        // and one of those matching the plain Save command saved before the name was heard.
+        if (heard == "save" || heard.startsWith("save ")) return true
         return PREFIXES.any { heard == it || heard.startsWith("$it ") } || heard.substringBefore(' ') in PREFIXES
     }
 }
@@ -129,8 +146,32 @@ object CommandMatcher {
             }
             best?.let { return it.first }
         }
+        // Nothing matched a whole phrase: accept a shortened one ("missed ones" for "try the missed
+        // ones again"), but only when exactly one command on this screen could mean it.
+        for (hypothesis in hypotheses) {
+            shortenedMatch(normalize(hypothesis), screen)?.let { return it }
+        }
         return null
     }
+
+    /**
+     * The one screen command whose phrase contains [heard] as a run of whole words, or null when
+     * none or several do. Filler words alone ("the", "one") never count, so noise can't press anything.
+     */
+    private fun shortenedMatch(heard: String, commands: List<VoiceCommand>): VoiceCommand? {
+        val words = heard.split(' ').filter { it.isNotEmpty() }
+        if (words.isEmpty() || words.all { it in FILLER_WORDS }) return null
+        val candidates = commands.filter { command ->
+            command.phrases.any { " ${normalize(it)} ".contains(" $heard ") }
+        }
+        return candidates.singleOrNull()
+    }
+
+    /** Words too common to pick a command on their own. */
+    private val FILLER_WORDS = setOf(
+        "a", "an", "the", "to", "it", "is", "of", "on", "in", "up", "my", "i", "me", "this", "that", "one", "and",
+        "or", "with", "for", "as", "at", "by", "use", "go", "do", "have", "please", "again",
+    )
 
     fun match(text: String, commands: List<VoiceCommand>, mode: VoiceMatchMode): VoiceCommand? =
         match(listOf(text), commands, mode)

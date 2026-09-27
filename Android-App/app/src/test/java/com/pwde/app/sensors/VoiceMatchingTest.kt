@@ -27,6 +27,21 @@ class CommandMatcherTest {
     }
 
     @Test
+    fun aShortenedLabelWorksWhenOnlyOneCommandFits() {
+        val retry = VoiceCommand("retry", "try the missed ones again")
+        val pick = VoiceCommand("pick", "choose a different one")
+        val blank = VoiceCommand("blank", "use a blank screen")
+        val screen = listOf(retry, pick, blank)
+        assertEquals(retry, CommandMatcher.match("missed ones", screen, VoiceMatchMode.EXACT))
+        assertEquals(pick, CommandMatcher.match("different one", screen, VoiceMatchMode.EXACT))
+        assertEquals(blank, CommandMatcher.match("blank screen", screen, VoiceMatchMode.EXACT))
+        // Filler alone, words out of order, or a fit for two commands press nothing.
+        assertNull(CommandMatcher.match("one", screen, VoiceMatchMode.EXACT))
+        assertNull(CommandMatcher.match("screen blank", screen, VoiceMatchMode.EXACT))
+        assertNull(CommandMatcher.match("move", listOf(VoiceCommand("l", "move left"), VoiceCommand("r", "move right")), VoiceMatchMode.EXACT))
+    }
+
+    @Test
     fun anywhereFindsTheWordInASentence() {
         assertEquals(attack, CommandMatcher.match("go attack now", commands, VoiceMatchMode.WORD_ANYWHERE))
     }
@@ -138,6 +153,18 @@ class VoiceActivationGateTest {
 }
 
 class DictationTest {
+    @Test
+    fun saveAsNamesAndSaves() {
+        assertEquals(Dictation.Parsed.SaveAs("fanny"), Dictation.parse("Save as Fanny"))
+        assertEquals(Dictation.Parsed.SaveAs(null), Dictation.parse("save"))
+        // Held while spoken, so a partial "save" can't save before the name arrives.
+        assertTrue(Dictation.isAssignment("save"))
+        assertTrue(Dictation.isAssignment("save as fan"))
+        assertTrue(Dictation.isAssignment("save a"))
+        assertEquals(Dictation.Parsed.SaveAs(null), Dictation.parse("save game profile"))
+        assertEquals(Dictation.Parsed.SaveAs("fanny 4 skill"), Dictation.parse("save fanny 4 skill"))
+    }
+
     @Test
     fun assignAndUseAssignTheRestOfTheUtterance() {
         assertEquals(Dictation.Parsed.Assign("skill one"), Dictation.parse("Assign skill one"))

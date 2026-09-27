@@ -47,16 +47,23 @@ fun rememberCalibrationOverlay(mode: CalibrationOverlayMode): Modifier {
         val current = box.value
         state.set(if (current != null) CalibrationOverlay.Confine(current) else CalibrationOverlay.Hidden)
     }
+    // Whether the box the modifier is on is attached anywhere. A detached or zero-sized layout must
+    // not report bounds: either would confine the pointer to nowhere.
+    val laidOut = remember { mutableStateOf(false) }
     // Own the state only while PWDe is actually on screen: clearing on pause keeps the pointer from
     // being confined or hidden while the user is away in a game with the overlay up.
     LifecycleResumeEffect(mode) {
-        publish()
+        if (laidOut.value) publish()
         onPauseOrDispose { state.clear() }
     }
     DisposableEffect(Unit) { onDispose { state.clear() } }
     if (mode != CalibrationOverlayMode.CONFINE_TO_BOX) return Modifier
     return Modifier.onGloballyPositioned { coordinates ->
         val bounds = coordinates.boundsInWindow()
+        if (!coordinates.isAttached || bounds.width <= 0f || bounds.height <= 0f) {
+            laidOut.value = false
+            return@onGloballyPositioned
+        }
         // boundsInWindow is window-relative; the overlay draws in display coordinates, so add where
         // this window sits on the display (the same origin the overlay view reports when drawing).
         val origin = IntArray(2).also { view.getLocationOnScreen(it) }
@@ -66,6 +73,7 @@ fun rememberCalibrationOverlay(mode: CalibrationOverlayMode): Modifier {
             right = origin[0] + bounds.right,
             bottom = origin[1] + bounds.bottom,
         )
+        laidOut.value = true
         publish()
     }
 }

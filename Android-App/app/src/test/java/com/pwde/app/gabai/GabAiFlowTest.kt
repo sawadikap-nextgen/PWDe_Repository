@@ -16,7 +16,9 @@ import com.pwde.app.data.model.TriggerType
 import com.pwde.app.data.model.VoiceActivationMode
 import com.pwde.app.data.model.VoiceMatchMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GabAiFlowTest {
@@ -96,6 +98,27 @@ class GabAiFlowTest {
     @Test
     fun cannotLeaveButtonMappingWithoutButtons() {
         assertEquals(GabAiState.ButtonMapping(0), GabAiFlow.buttonsDone(GabAiForm()))
+    }
+
+    /**
+     * The screen is only held in the game's orientation while the user is working on the game's own
+     * screen. Once mapping is done, naming and saving is a form: holding it landscape left the device
+     * stuck sideways after the mapping was finished.
+     */
+    @Test
+    fun orientationLockCoversTheGameScreenStepsOnly() {
+        // Placing, assigning and testing are done on the game's screen.
+        assertTrue(GabAiFlow.locksGameScreenOrientation(GabAiState.ButtonMapping(3)))
+        assertTrue(GabAiFlow.locksGameScreenOrientation(GabAiState.AssignTriggers))
+        assertFalse(GabAiFlow.locksGameScreenOrientation(GabAiState.TestControls))
+
+        // Everything after that is a form or a choice, so the lock is released.
+        assertFalse(GabAiFlow.locksGameScreenOrientation(GabAiState.NameAndSaveProfile))
+        assertFalse(GabAiFlow.locksGameScreenOrientation(GabAiState.ProfileSaved))
+        assertFalse(GabAiFlow.locksGameScreenOrientation(GabAiState.Welcome))
+        assertFalse(GabAiFlow.locksGameScreenOrientation(GabAiState.ChooseGame))
+        assertFalse(GabAiFlow.locksGameScreenOrientation(GabAiState.UploadScreenshot))
+        assertFalse(GabAiFlow.locksGameScreenOrientation(GabAiState.CalibrationVoiceSetup))
     }
 
     @Test

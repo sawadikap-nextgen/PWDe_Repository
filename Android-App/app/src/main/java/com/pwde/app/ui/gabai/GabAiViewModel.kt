@@ -209,6 +209,7 @@ class GabAiViewModel(
                 when (val parsed = Dictation.parse(result.transcript)) {
                     is Dictation.Parsed.Assign -> assignByVoice(parsed.words)
                     Dictation.Parsed.Retry -> retryAssignment()
+                    is Dictation.Parsed.SaveAs -> saveAsByVoice(parsed.name)
                     null -> Unit
                 }
             }
@@ -593,6 +594,14 @@ class GabAiViewModel(
         else -> null
     }
 
+    /** "save as <name>" (or bare "save") on the save steps: take the spoken name, then save. */
+    private fun saveAsByVoice(name: String?) {
+        val target = dictationTarget(_ui.value)
+        if (target != DictationTarget.ProfileName && target != DictationTarget.CalibrationName) return
+        if (!name.isNullOrBlank()) assignByVoice(name)
+        if (target == DictationTarget.ProfileName) saveGameProfile() else saveCalibration()
+    }
+
     private fun assignByVoice(words: String) {
         val buttons = _ui.value.form.buttons
         when (val target = dictationTarget(_ui.value) ?: return) {
@@ -929,5 +938,5 @@ class GabAiViewModel(
 }
 
 /** Said on the test step, where the in-game engine has the mic; the screen shows them too. */
-internal val TEST_DONE_PHRASES = listOf("done testing", "finish testing", "looks good")
+internal val TEST_DONE_PHRASES = listOf("next", "done testing", "finish testing", "looks good")
 internal val TEST_CHANGE_PHRASES = listOf("change mapping", "edit mapping")

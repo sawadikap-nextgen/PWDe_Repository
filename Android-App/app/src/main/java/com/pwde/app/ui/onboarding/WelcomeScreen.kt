@@ -26,7 +26,7 @@ import com.pwde.app.ui.components.voiceCommand
 import com.pwde.app.ui.theme.PwdeTheme
 
 private val WELCOME_COMMANDS = listOf(
-    voiceCommand("guest", "get started", "continue as guest", "start setup"),
+    voiceCommand("guest", "get started as guest", "get started", "continue as guest", "start setup"),
     voiceCommand("account", "i have an account", "sign in", "log in"),
 )
 
