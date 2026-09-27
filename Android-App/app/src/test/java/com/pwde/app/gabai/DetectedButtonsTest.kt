@@ -51,7 +51,6 @@ class DetectedButtonsTest {
 
     @Test
     fun skillsAndUpgradesAreNumberedLeftToRightWhateverTheirHeight() {
-        // MLBB's arc: skill 1 lowest and leftmost, the ultimate highest and rightmost; each upgrade sits above its skill.
         val buttons = detectedToButtons(
             listOf(
                 detected("skill_upgrade", 0.86f, 0.45f), detected("skill_button", 0.88f, 0.55f),

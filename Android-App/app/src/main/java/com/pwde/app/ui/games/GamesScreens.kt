@@ -6,11 +6,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.CheckCircle
@@ -53,6 +58,8 @@ import com.pwde.app.ui.components.MainTab
 import com.pwde.app.ui.components.PlaceholderNotice
 import com.pwde.app.ui.components.PwdeBottomNav
 import com.pwde.app.ui.components.PwdeButton
+import com.pwde.app.ui.components.PwdeDialog
+import com.pwde.app.ui.components.PwdeTextField
 import com.pwde.app.ui.components.PwdeScreen
 import com.pwde.app.ui.components.SectionTitle
 import com.pwde.app.ui.components.StatusPill
@@ -64,6 +71,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import com.pwde.app.data.games.CustomGamesRepository
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -99,11 +108,21 @@ internal fun GameThumbnail(
             .border(1.dp, PwdeTheme.colors.borderBrush, shape),
     )
 }
-/** Which games already have a saved game profile (from Room). */
-class GamesViewModel(profileRepository: ProfileRepository) : ViewModel() {
+/** Which games already have a saved game profile (from Room), and the games the user added. */
+class GamesViewModel(
+    profileRepository: ProfileRepository,
+    private val customGamesRepository: CustomGamesRepository = CustomGamesRepository.InMemory(),
+) : ViewModel() {
     val gamesWithProfiles: StateFlow<Set<String>> = profileRepository.gameProfiles
         .map { profiles -> profiles.map { it.gameId }.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    val customGames: StateFlow<List<String>> = customGamesRepository.names
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun addGame(name: String) {
+        viewModelScope.launch { customGamesRepository.add(name) }
+    }
 }
 
 /** Say a game's name to open it; say a tab's name to switch tabs. */
@@ -121,18 +140,153 @@ private fun GameListVoice(current: MainTab, onGame: (Game) -> Unit, onTab: (Main
     }
 }
 
+/** [compact] is the half-width grid cell: taller art, and the status pill under the name instead of beside it. */
 @Composable
-fun GameCard(game: Game, hasProfile: Boolean, onClick: () -> Unit) {
+fun GameCard(game: Game, hasProfile: Boolean, compact: Boolean = false, onClick: () -> Unit) {
     val colors = PwdeTheme.colors
-    GradientCard(Modifier.fillMaxWidth(), onClick = onClick) {
-        GameArt(game)
-        Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(game.displayName, style = MaterialTheme.typography.titleLarge, color = colors.text)
-                Text(game.genre, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+    val status: @Composable () -> Unit = {
+        if (hasProfile) StatusPill("Profile ready", icon = Icons.Outlined.CheckCircle)
+        else StatusPill("No profile yet", color = colors.textMuted)
+    }
+    GradientCard(if (compact) Modifier.fillMaxWidth().fillMaxHeight() else Modifier.fillMaxWidth(), onClick = onClick) {
+        GameArt(game, aspectRatio = if (compact) GRID_ART_ASPECT else 2.4f)
+        if (compact) {
+            Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(game.displayName, style = MaterialTheme.typography.titleMedium, color = colors.text, maxLines = 2)
+                Text(game.genre, style = MaterialTheme.typography.bodySmall, color = colors.textMuted, maxLines = 1)
+                status()
             }
-            if (hasProfile) StatusPill("Profile ready", icon = Icons.Outlined.CheckCircle)
-            else StatusPill("No profile yet", color = colors.textMuted)
+        } else {
+            Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(game.displayName, style = MaterialTheme.typography.titleLarge, color = colors.text)
+                    Text(game.genre, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                }
+                status()
+            }
+        }
+    }
+}
+
+/** At half width the full-width 2.4:1 banner is a thin strip; a squarer crop keeps the artwork readable. */
+private const val GRID_ART_ASPECT = 1.5f
+
+/** Rows of two for [GameGrid]; the last row holds one game when the count is odd. */
+internal fun <T> gridRows(items: List<T>): List<List<T>> = items.chunked(2)
+
+/** One cell of [GameGrid]: a supported game, or one the user added by name. */
+internal sealed interface GridEntry {
+    data class Supported(val game: Game) : GridEntry
+    data class Added(val name: String) : GridEntry
+    /** The "Add a game" card, always last. */
+    data object AddGame : GridEntry
+}
+
+/** Supported games first, then the ones the user added, in the order they were added. */
+internal fun gridEntries(games: List<Game>, customGames: List<String>, withAddCard: Boolean = false): List<GridEntry> =
+    games.map { GridEntry.Supported(it) } + customGames.map { GridEntry.Added(it) } + listOfNotNull(GridEntry.AddGame.takeIf { withAddCard })
+
+/** Games two per row. An odd one out keeps half width, with an empty slot beside it. */
+@Composable
+fun GameGrid(
+    games: List<Game>,
+    hasProfile: (Game) -> Boolean,
+    onGame: (Game) -> Unit,
+    customGames: List<String> = emptyList(),
+    /** Tapping an added game: map its buttons by hand. */
+    onAddedGame: (name: String) -> Unit = {},
+    /** When set, an "Add a game" card ends the grid, same size as the game cards. */
+    onAddGame: ((name: String) -> Unit)? = null,
+) {
+    val gap = PwdeTheme.spacing.itemGap
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+        gridRows(gridEntries(games, customGames, withAddCard = onAddGame != null)).forEach { row ->
+            // Cards in a row share the tallest one's height, so a long name doesn't leave them ragged.
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                row.forEach { entry ->
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        when (entry) {
+                            is GridEntry.Supported -> GameCard(entry.game, hasProfile(entry.game), compact = true) { onGame(entry.game) }
+                            is GridEntry.Added -> AddedGameCard(entry.name) { onAddedGame(entry.name) }
+                            GridEntry.AddGame -> onAddGame?.let { AddGameCard(it) }
+                        }
+                    }
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** The name to submit from the Add-a-game field, or null while it's blank (which keeps "Add" disabled). */
+internal fun addGameName(input: String): String? = input.trim().takeIf { it.isNotBlank() }
+
+/**
+ * Entry point for adding a game: the card opens a name-entry dialog and hands the trimmed name to
+ * [onAddGame], which saves it as an [AddedGameCard]. The dialog's state is local, like the Games
+ * screen's other UI state.
+ */
+@Composable
+fun AddGameCard(onAddGame: (name: String) -> Unit) {
+    val colors = PwdeTheme.colors
+    var open by rememberSaveable { mutableStateOf(false) }
+    var name by rememberSaveable { mutableStateOf("") }
+    val close = { open = false; name = "" }
+    // Laid out like a compact GameCard (art, name, line, pill) so it sits in the grid as an equal.
+    GradientCard(Modifier.fillMaxWidth().fillMaxHeight(), onClick = { open = true }) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(GRID_ART_ASPECT)
+                .clip(PwdeShapes.button)
+                .border(1.5.dp, colors.primary.copy(alpha = 0.6f), PwdeShapes.button),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Add, contentDescription = null, tint = colors.primary, modifier = Modifier.size(40.dp))
+        }
+        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Add a game", style = MaterialTheme.typography.titleMedium, color = colors.text, maxLines = 2)
+            Text("Any game, by name", style = MaterialTheme.typography.bodySmall, color = colors.textMuted, maxLines = 1)
+            StatusPill("Map it yourself", color = colors.textMuted)
+        }
+    }
+    if (open) {
+        val submitted = addGameName(name)
+        PwdeDialog(onDismiss = close, title = "Add a game") {
+            PwdeTextField("Game name", name, { name = it }, Modifier.fillMaxWidth())
+            PwdeButton(
+                "Add",
+                onClick = { submitted?.let { onAddGame(it); close() } },
+                enabled = submitted != null,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            PwdeButton("Cancel", close, style = ButtonStyle.SECONDARY, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/**
+ * A game the user added by name: same shape as a compact [GameCard], with plain artwork. It can't
+ * be launched yet (see [CustomGamesRepository]), but tapping it maps its buttons by hand.
+ */
+@Composable
+fun AddedGameCard(name: String, onClick: () -> Unit) {
+    val colors = PwdeTheme.colors
+    GradientCard(Modifier.fillMaxWidth().fillMaxHeight(), onClick = onClick) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(GRID_ART_ASPECT)
+                .clip(PwdeShapes.button)
+                .background(Brush.linearGradient(listOf(colors.secondary.copy(alpha = 0.6f), colors.primary.copy(alpha = 0.35f)))),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.SportsEsports, contentDescription = null, tint = colors.text, modifier = Modifier.size(40.dp))
+        }
+        Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(name, style = MaterialTheme.typography.titleMedium, color = colors.text, maxLines = 2)
+            Text("Tap to map buttons", style = MaterialTheme.typography.bodySmall, color = colors.textMuted, maxLines = 1)
+            StatusPill("Not supported yet", color = colors.textMuted)
         }
     }
 }
@@ -146,13 +300,13 @@ internal fun gameArtRes(game: Game): Int? = when (game) {
 
 /** Game artwork with a scrim so the title/status text stays readable. Falls back to a gradient + icon. */
 @Composable
-internal fun GameArt(game: Game) {
+internal fun GameArt(game: Game, aspectRatio: Float = 2.4f) {
     val colors = PwdeTheme.colors
     val res = gameArtRes(game)
     Box(
         Modifier
             .fillMaxWidth()
-            .aspectRatio(2.4f)
+            .aspectRatio(aspectRatio)
             .clip(PwdeShapes.button)
             .background(
                 Brush.linearGradient(
@@ -281,8 +435,9 @@ internal val GAME_DETAIL_COMMANDS = listOf(
 
 /** D2 Games: narrow the game list by genre or setup status; tiles show their setup status. */
 @Composable
-fun GamesScreen(viewModel: GamesViewModel, onGame: (Game) -> Unit, onTab: (MainTab) -> Unit) {
+fun GamesScreen(viewModel: GamesViewModel, onGame: (Game) -> Unit, onTab: (MainTab) -> Unit, onMapAddedGame: (name: String) -> Unit = {}) {
     val withProfiles by viewModel.gamesWithProfiles.collectAsStateWithLifecycle()
+    val customGames by viewModel.customGames.collectAsStateWithLifecycle()
     var filter by rememberSaveable { mutableStateOf(GameFilter.ALL) }
     var query by rememberSaveable { mutableStateOf("") }
     val results = Game.entries.filter { game ->
@@ -291,6 +446,9 @@ fun GamesScreen(viewModel: GamesViewModel, onGame: (Game) -> Unit, onTab: (MainT
                     it.contains(query.trim(), ignoreCase = true)
                 })
     }
+    // Added games have no genre or profile, so only "All games" and the search reach them.
+    val addedResults = if (filter != GameFilter.ALL) emptyList() else customGames.filter { query.isBlank() || it.contains(query.trim(), ignoreCase = true) }
+    val count = results.size + addedResults.size
     GameListVoice(MainTab.GAMES, onGame, onTab)
     val filterCommands = remember { GameFilter.entries.map { voiceCommand(it.name, it.label) } }
     VoiceCommandsEffect(filterCommands) { id -> filter = GameFilter.valueOf(id) }
@@ -355,8 +513,8 @@ fun GamesScreen(viewModel: GamesViewModel, onGame: (Game) -> Unit, onTab: (MainT
                 }
             }
         }
-        SectionTitle("${results.size} ${if (results.size == 1) "game" else "games"}")
-        if (results.isEmpty()) InfoNote("No games match this search and filter.")
-        results.forEach { game -> GameCard(game, game.id in withProfiles) { onGame(game) } }
+        SectionTitle("$count ${if (count == 1) "game" else "games"}")
+        if (count == 0) InfoNote("No games match this search and filter.")
+        GameGrid(results, hasProfile = { it.id in withProfiles }, onGame = onGame, customGames = addedResults, onAddedGame = onMapAddedGame, onAddGame = viewModel::addGame)
     }
 }

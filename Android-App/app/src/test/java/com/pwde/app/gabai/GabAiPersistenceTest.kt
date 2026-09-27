@@ -49,7 +49,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.LooperMode
 
-private class FakeFaceTracking : FaceTrackingManager {
+internal class FakeFaceTracking : FaceTrackingManager {
     override val state = MutableStateFlow(FaceState())
     override val gestureEvents = MutableSharedFlow<FacialGesture>()
     override val surfaceRequest = MutableStateFlow<SurfaceRequest?>(null)
@@ -59,7 +59,7 @@ private class FakeFaceTracking : FaceTrackingManager {
     override suspend fun captureJoystickCenter(persistToActiveProfile: Boolean) = false
 }
 
-private class FakeVoice : VoiceCommandManager {
+internal class FakeVoice : VoiceCommandManager {
     override val state = MutableStateFlow(VoiceState())
     override val results = MutableSharedFlow<VoiceResult>()
     override val hasMicPermission = false

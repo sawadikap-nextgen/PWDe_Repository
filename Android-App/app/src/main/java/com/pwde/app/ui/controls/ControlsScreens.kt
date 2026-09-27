@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Gamepad
 import androidx.compose.material.icons.outlined.Mouse
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.ScreenRotation
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Icon
@@ -71,6 +72,7 @@ import com.pwde.app.ui.components.OptionKind
 import com.pwde.app.ui.components.Pager
 import com.pwde.app.ui.components.PlaceholderNotice
 import com.pwde.app.ui.components.PwdeButton
+import com.pwde.app.ui.components.PwdeDialog
 import com.pwde.app.ui.components.PwdeScreen
 import com.pwde.app.ui.components.SectionTitle
 import com.pwde.app.ui.components.SegmentedToggle
@@ -87,7 +89,7 @@ import com.pwde.app.ui.theme.PwdeTheme
 import com.pwde.app.ui.theme.iconSizeFor
 import com.pwde.app.ui.theme.scaled
 
-enum class ControlsDestination { INPUT, GESTURES, CURSOR, JOYSTICK, VOICE, CUSTOM_BUTTONS }
+enum class ControlsDestination { INPUT, GESTURES, CURSOR, JOYSTICK, VOICE, CUSTOM_BUTTONS, MANUAL_BUTTONS }
 
 private val HUB_COMMANDS = listOf(
     voiceCommand(ControlsDestination.INPUT.name, "input", "input mode"),
@@ -96,24 +98,56 @@ private val HUB_COMMANDS = listOf(
     voiceCommand(ControlsDestination.JOYSTICK.name, "joystick"),
     voiceCommand(ControlsDestination.VOICE.name, "voice"),
     voiceCommand(ControlsDestination.CUSTOM_BUTTONS.name, "custom buttons"),
+    voiceCommand(ControlsDestination.MANUAL_BUTTONS.name, "manual mapping", "manual"),
+)
+
+private const val GUIDED_MAPPING = "guided_mapping"
+private val MAPPING_CHOICE_COMMANDS = listOf(
+    voiceCommand(GUIDED_MAPPING, "guided", "gab ai"),
+    voiceCommand(ControlsDestination.MANUAL_BUTTONS.name, "manual mapping", "manual"),
 )
 
 /** E1 Controls hub: six compact cards. */
 @Composable
 fun ControlsHubScreen(onBack: () -> Unit, onOpen: (ControlsDestination) -> Unit) {
-    VoiceCommandsEffect(HUB_COMMANDS) { id -> onOpen(ControlsDestination.valueOf(id)) }
+    // "Custom buttons" first asks how: GabAI's guided flow, or placing buttons by hand.
+    var choosingMapping by rememberSaveable { mutableStateOf(false) }
+    val open: (ControlsDestination) -> Unit = { destination ->
+        if (destination == ControlsDestination.CUSTOM_BUTTONS) choosingMapping = true else onOpen(destination)
+    }
+    if (choosingMapping) {
+        MappingChoiceDialog(
+            onGuided = { choosingMapping = false; onOpen(ControlsDestination.CUSTOM_BUTTONS) },
+            onManual = { choosingMapping = false; onOpen(ControlsDestination.MANUAL_BUTTONS) },
+            onDismiss = { choosingMapping = false },
+        )
+    } else {
+        VoiceCommandsEffect(HUB_COMMANDS) { id -> open(ControlsDestination.valueOf(id)) }
+    }
     PwdeScreen(
         title = "Controls",
         subtitle = "Everything that controls your games.",
         onBack = onBack,
         voiceHint = "Say a card's name, like \"joystick\"",
     ) {
-        NavCard("Input", "Head, joystick or voice", Icons.Outlined.Face, { onOpen(ControlsDestination.INPUT) })
-        NavCard("Gestures", "Which face move does what", Icons.Outlined.TouchApp, { onOpen(ControlsDestination.GESTURES) })
-        NavCard("Cursor speed", "How fast the pointer moves", Icons.Outlined.Mouse, { onOpen(ControlsDestination.CURSOR) })
-        NavCard("Joystick", "Size, sensitivity, dead zone", Icons.Outlined.Gamepad, { onOpen(ControlsDestination.JOYSTICK) })
-        NavCard("Voice", "Commands and matching", Icons.Outlined.RecordVoiceOver, { onOpen(ControlsDestination.VOICE) })
-        NavCard("Custom buttons", "Map a game's buttons with GabAI", Icons.Outlined.Dashboard, { onOpen(ControlsDestination.CUSTOM_BUTTONS) })
+        NavCard("Input", "Head, joystick or voice", Icons.Outlined.Face, { open(ControlsDestination.INPUT) })
+        NavCard("Gestures", "Which face move does what", Icons.Outlined.TouchApp, { open(ControlsDestination.GESTURES) })
+        NavCard("Cursor speed", "How fast the pointer moves", Icons.Outlined.Mouse, { open(ControlsDestination.CURSOR) })
+        NavCard("Joystick", "Size, sensitivity, dead zone", Icons.Outlined.Gamepad, { open(ControlsDestination.JOYSTICK) })
+        NavCard("Voice", "Commands and matching", Icons.Outlined.RecordVoiceOver, { open(ControlsDestination.VOICE) })
+        NavCard("Custom buttons", "Map a game's buttons: guided or manual", Icons.Outlined.Dashboard, { open(ControlsDestination.CUSTOM_BUTTONS) })
+    }
+}
+
+/** Guided (GabAI calibrates, detects and walks through everything) or Manual (just place, assign, save). */
+@Composable
+private fun MappingChoiceDialog(onGuided: () -> Unit, onManual: () -> Unit, onDismiss: () -> Unit) {
+    VoiceCommandsEffect(MAPPING_CHOICE_COMMANDS) { id -> if (id == GUIDED_MAPPING) onGuided() else onManual() }
+    PwdeDialog(onDismiss = onDismiss, title = "Map a game's buttons") {
+        PwdeButton("Guided (GabAI)", onGuided, icon = Icons.Outlined.AutoAwesome, modifier = Modifier.fillMaxWidth())
+        Text("GabAI finds the buttons on your screenshot and walks you through setup.", style = MaterialTheme.typography.bodySmall, color = PwdeTheme.colors.textMuted)
+        PwdeButton("Manual mapping", onManual, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.TouchApp, modifier = Modifier.fillMaxWidth())
+        Text("Place the buttons yourself, then pick what presses each. No calibration or detection.", style = MaterialTheme.typography.bodySmall, color = PwdeTheme.colors.textMuted)
     }
 }
 

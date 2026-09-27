@@ -96,6 +96,8 @@ data class GabAiForm(
     /** Editing an existing game profile rather than creating one. */
     val editingGameProfileId: Long? = null,
     val savedGameProfileId: Long? = null,
+    /** Manual mapping: no calibration steps and no button detection; the screenshot is only a backdrop. */
+    val manual: Boolean = false,
 )
 
 /** State and form ⇄ the strings stored in Room. Anything unreadable falls back safely. */
@@ -168,6 +170,7 @@ object GabAiCodec {
         val gameId: String? = null, val calibrationProfileId: Long? = null, val screenshotPath: String? = null,
         val buttonsJson: String? = null, val profileName: String? = null,
         val editingGameProfileId: Long? = null, val savedGameProfileId: Long? = null,
+        val manual: Boolean? = null,
     ) {
         fun toForm(): GabAiForm {
             val d = GabAiForm()
@@ -195,6 +198,7 @@ object GabAiCodec {
                 profileName = profileName.orEmpty(),
                 editingGameProfileId = editingGameProfileId,
                 savedGameProfileId = savedGameProfileId,
+                manual = manual ?: false,
             )
         }
 
@@ -211,6 +215,7 @@ object GabAiCodec {
                 gameId = f.gameId, calibrationProfileId = f.calibrationProfileId, screenshotPath = f.screenshotPath,
                 buttonsJson = ControlJson.encodeButtons(f.buttons), profileName = f.profileName,
                 editingGameProfileId = f.editingGameProfileId, savedGameProfileId = f.savedGameProfileId,
+                manual = f.manual,
             )
         }
     }
