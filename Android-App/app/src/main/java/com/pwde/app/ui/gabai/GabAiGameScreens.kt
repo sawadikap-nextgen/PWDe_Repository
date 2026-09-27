@@ -597,17 +597,14 @@ private fun TriggerChooser(
     val availableTriggerTypes = TriggerType.entries.filter {
         it != TriggerType.JOYSTICK && it != TriggerType.MOVEMENT
     }
-
     GradientCard(
-        Modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 2.dp, vertical = 2.dp)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            modifier = Modifier.fillMaxWidth(), // no padding here — let's isolate the source first
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Header Row
             Row(
