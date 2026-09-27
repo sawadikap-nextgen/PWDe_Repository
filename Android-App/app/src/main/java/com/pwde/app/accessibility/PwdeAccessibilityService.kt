@@ -42,6 +42,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -76,6 +77,9 @@ class PwdeAccessibilityService : AccessibilityService() {
 
     /** Names the tap and scroll fingers, so each one is its own finger on screen. */
     private var tapSeq = 0
+
+    /** Taps waiting for the stick's release stroke to finish; the stick stays up until they are sent. */
+    private var pendingTaps = 0
     private var scrollSeq = 0
 
     /**
@@ -157,7 +161,10 @@ class PwdeAccessibilityService : AccessibilityService() {
      * double up.
      */
     private fun render(state: LivePlayState, inApp: Boolean, pwdeInForeground: Boolean, livePlay: LivePlay) {
+        val previous = drawnMode
         drawnMode = state.overlayMode(inApp, pwdeInForeground)
+        // A drag belongs to the screen it started on: a session starting or ending lets it go.
+        if (drawnMode != previous) gestures.release(DRAG)
         when (drawnMode) {
             OverlayMode.OFF -> {
                 gestures.cancelAll()
@@ -233,14 +240,16 @@ class PwdeAccessibilityService : AccessibilityService() {
      * PWDe is on screen and one of its own screens claimed the overlay. Same views as over a game, so
      * the user learns one pointer; different behaviour, because there is no game to press:
      *
-     * - no movement stick is held (nothing to steer), so nothing is left down on the screen;
+     * - no movement stick is held (nothing to steer); only a drag the user asked for stays down;
      * - the caption reports the **app-wide** recognizer (Android `SpeechRecognizer`, i.e. Google),
      *   which is the only thing listening while PWDe is in front — not the in-game sherpa spotter;
      * - gestures still fire their commands: [handleIdleGesture] hands them to `perform`, which is the
      *   whole point of using this overlay rather than a drawing that cannot press anything.
      */
     private fun renderInApp(state: LivePlayState, livePlay: LivePlay) {
-        gestures.cancelAll()
+        // Not `gestures.cancelAll()`: this runs every tracking frame, and clearing the chain here
+        // dropped a drag (and cut a scroll short) one frame after it started.
+        releaseStick()
         val face = state.face
         val joystick = face.outputMode == FaceOutputMode.JOYSTICK
         (bubbleView ?: createBubble(livePlay))?.update(
@@ -255,7 +264,7 @@ class PwdeAccessibilityService : AccessibilityService() {
             removeView(cursorView)
             cursorView = null
         } else {
-            renderCursor(face, active = face.hasFace && !state.paused, dragging = false)
+            renderCursor(face, active = face.hasFace && !state.paused, dragging = gestures.isDown(DRAG))
         }
         // Read, not collect: collecting the app-wide manager's state would start its recognizer and
         // break its "only listens while PWDe is on screen" guarantee. Every tracking frame re-renders
@@ -279,7 +288,8 @@ class PwdeAccessibilityService : AccessibilityService() {
         val config = controlsRepository.config.first()
         val state = livePlay.state.value
         if (state.active) return
-        val command = GameInput.fromGesture(gesture, emptyList(), config)
+        // No session keeps a `dragging` flag here, so the finger itself says whether one is held.
+        val command = GameInput.resolveDrag(GameInput.fromGesture(gesture, emptyList(), config), gestures.isDown(DRAG))
         GameInput.navigationRefusal(command, state.navigationMode())?.let {
             Log.i(TAG, "Ignored idle gesture ${gesture.label}: $it")
             return
@@ -497,12 +507,17 @@ class PwdeAccessibilityService : AccessibilityService() {
         val movement = state.buttons.firstOrNull { it.trigger?.type == TriggerType.MOVEMENT }
         // A locked centre is the brake: taking the release path lifts the game's movement finger, so
         // the character stops and stays stopped however the head (or the phone) moves.
+        // A held drag owns the screen: the stick's own gestures would cancel it.
         val holding = movement != null && face.outputMode == FaceOutputMode.JOYSTICK && face.hasFace &&
-            !state.paused && !state.centerLocked
+            !state.paused && !state.centerLocked && !gestures.isDown(DRAG)
         if (!holding) {
             releaseStick()
             return
         }
+        // A tap (a voice command, a gesture) has the screen: re-pressing the stick now would dispatch
+        // a new gesture, and a new gesture cancels the tap in flight — the command was heard but never
+        // pressed. The stick grabs again on the first frame after the tap has finished.
+        if (pendingTaps > 0 || !gestures.idle) return
         val (width, height) = displaySize()
         val base = toScreen(movement.x, movement.y)
         // The Size setting is the stick's travel: the same radius the preview and the marker draw.
@@ -587,14 +602,20 @@ class PwdeAccessibilityService : AccessibilityService() {
             GameCommand.TouchHold -> tap(pointer, HOLD_MS)
             is GameCommand.Scroll -> swipe(pointer, command.direction)
             GameCommand.StartDrag -> {
+                // The finger ends for reasons of its own too — a tap needs the screen, or the system
+                // cancels the chain. The session's "dragging" must follow, or the next drag gesture
+                // reads as "drop" and does nothing.
+                val ended = { if (livePlay.state.value.dragging) livePlay.request(GameCommand.Drop) }
                 gestures.touch(
                     name = DRAG,
                     startAt = pointer,
                     target = { livePlay.state.value.face.cursor.let { toScreen(it.x, it.y) } },
-                    onCancelled = { livePlay.request(GameCommand.Drop) },
+                    onEnd = { ended() },
+                    onCancelled = ended,
                 )
             }
             GameCommand.Drop -> gestures.release(DRAG)
+            GameCommand.ToggleDrag -> perform(GameInput.resolveDrag(command, gestures.isDown(DRAG)), livePlay)
             GameCommand.Recents -> performGlobalAction(GLOBAL_ACTION_RECENTS)
             GameCommand.Back -> performGlobalAction(GLOBAL_ACTION_BACK)
             GameCommand.Home -> performGlobalAction(GLOBAL_ACTION_HOME)
@@ -615,7 +636,8 @@ class PwdeAccessibilityService : AccessibilityService() {
      * [onResult] says how it ended (for the button markers).
      */
     private fun tap(point: PointF, durationMs: Long, onResult: (ButtonMarkersView.Outcome) -> Unit = {}) {
-        val sharing = gestures.isDown(STICK) || gestures.isDown(DRAG) || stickMachine.isPressed()
+        val stickWasDown = stickMachine.isPressed()
+        val sharing = gestures.isDown(STICK) || gestures.isDown(DRAG) || stickWasDown
         // The stick's finger has to be gone before the tap's gesture goes out: a new gesture cancels
         // whatever is in flight, and a tap riding along with the stick never reaches the game.
         releaseStick()
@@ -625,22 +647,38 @@ class PwdeAccessibilityService : AccessibilityService() {
             "-> $name at (${point.x.toInt()}, ${point.y.toInt()}) for ${durationMs}ms" +
                 if (sharing) " (nothing else may be on screen: the stick is let go first)" else " (on its own)",
         )
-        gestures.touchAlone(
-            name = name,
-            startAt = point,
-            endAfterMs = durationMs,
-            onEnd = { completed ->
-                Log.i(TAG, "$name " + if (completed) "completed" else "DID NOT complete — the system dropped it")
-                onResult(
-                    when {
-                        !completed -> ButtonMarkersView.Outcome.FAILED
-                        // Still worth showing: this press happened while the stick was in use.
-                        sharing -> ButtonMarkersView.Outcome.WITH_JOYSTICK
-                        else -> ButtonMarkersView.Outcome.TAPPED
-                    },
-                )
-            },
-        )
+        val press = {
+            gestures.touchAlone(
+                name = name,
+                startAt = point,
+                endAfterMs = durationMs,
+                onEnd = { completed ->
+                    Log.i(TAG, "$name " + if (completed) "completed" else "DID NOT complete — the system dropped it")
+                    onResult(
+                        when {
+                            !completed -> ButtonMarkersView.Outcome.FAILED
+                            // Still worth showing: this press happened while the stick was in use.
+                            sharing -> ButtonMarkersView.Outcome.WITH_JOYSTICK
+                            else -> ButtonMarkersView.Outcome.TAPPED
+                        },
+                    )
+                },
+            )
+        }
+        val s = scope
+        if (!stickWasDown || s == null) return press()
+        // Let the stick's release stroke finish first: dispatching the tap straight away cancels it,
+        // and the game gets a cancelled stick instead of a clean lift. The stick stays off the screen
+        // meanwhile ([pendingTaps]) so it cannot re-press in the gap.
+        pendingTaps++
+        s.launch {
+            try {
+                delay(STICK_RELEASE_DURATION_MS + TAP_AFTER_RELEASE_MARGIN_MS)
+                press()
+            } finally {
+                pendingTaps--
+            }
+        }
     }
 
     /** Moves the content under the pointer so it scrolls the way [direction] reads. */
@@ -709,6 +747,9 @@ class PwdeAccessibilityService : AccessibilityService() {
 
         /** How long the final stationary release stroke holds the finger before lifting it. */
         private const val STICK_RELEASE_DURATION_MS = 40L
+
+        /** Slack after the stick's release stroke before a tap goes out, so the tap cannot cancel it. */
+        private const val TAP_AFTER_RELEASE_MARGIN_MS = 15L
 
         /** Drag speed: longer strokes for longer moves, bounded so the finger tracks promptly. */
         private const val STROKE_MS_PER_PX = 0.6f

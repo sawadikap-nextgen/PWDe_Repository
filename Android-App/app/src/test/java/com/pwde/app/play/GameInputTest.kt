@@ -221,6 +221,24 @@ class GameInputTest {
         assertFalse(GameInput.fromVoice(GameInput.LOCK_CENTER, "lock center", buttons) == GameInput.fromVoice(GameInput.UNLOCK_CENTER, "unlock center", buttons))
     }
 
+    /**
+     * One gesture picks up and puts down, so a user who can make only one or two gestures can still
+     * scroll by dragging. The toggle is resolved against what is held right now.
+     */
+    @Test
+    fun theDragGesturePicksUpThenLetsGo() {
+        val config = ControlConfig(gestureAssignments = mapOf(GestureAction.DRAG to gesture))
+        val command = GameInput.fromGesture(gesture, emptyList(), config)
+        assertEquals(GameCommand.ToggleDrag, command)
+        assertEquals(GameCommand.StartDrag, GameInput.resolveDrag(command, dragging = false))
+        assertEquals(GameCommand.Drop, GameInput.resolveDrag(command, dragging = true))
+        // Drop still works while paused, so the finger can always be let go.
+        assertTrue(GameInput.worksWhilePaused(GameInput.resolveDrag(command, dragging = true)))
+        // Anything else passes through untouched.
+        assertEquals(GameCommand.Select, GameInput.resolveDrag(GameCommand.Select, dragging = true))
+        assertNull(GameInput.navigationRefusal(command, NavigationMode.GAME))
+    }
+
     /** The brake holds the movement stick still, so it is only refused where there is no stick. */
     @Test
     fun theBrakeOnlyMakesSenseWithAMovementStick() {

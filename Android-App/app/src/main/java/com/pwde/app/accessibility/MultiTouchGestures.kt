@@ -74,6 +74,12 @@ class MultiTouchGestures(
      */
     val ready: Boolean get() = !inFlight
 
+    /**
+     * True when no finger is down, waiting or in flight. A gesture dispatched from outside the chain
+     * (the movement stick) cancels whatever is in flight, so it must wait for this.
+     */
+    val idle: Boolean get() = !inFlight && down.isEmpty() && waiting.isEmpty()
+
     /** True when [name] is down, or is about to go down in the segment being built. */
     fun isDown(name: String): Boolean = down.containsKey(name) || waiting.containsKey(name)
 
@@ -164,13 +170,16 @@ class MultiTouchGestures(
         for (name in plan.continued + plan.lifted) {
             val finger = down[name] ?: continue
             val previous = finger.stroke ?: continue
-            val to = finger.target(now - finger.pressedAt)
+            val last = name in plan.lifted
+            // A held finger (a drag) that is let go lifts where it is: the release segment standing
+            // still is longer than Android's 40 ms "pointer stopped" window, so the lift carries no
+            // velocity and a dragged list stays where the user put it instead of flinging on.
+            val to = if (last && !finger.transient) finger.point else finger.target(now - finger.pressedAt)
             val path = Path().apply {
                 moveTo(finger.point.x, finger.point.y)
                 lineTo(to.x, to.y)
             }
             finger.point = to
-            val last = name in plan.lifted
             val stroke = previous.continueStroke(path, 0, SEGMENT_MS, !last)
             finger.stroke = if (last) null else stroke
             strokes += stroke

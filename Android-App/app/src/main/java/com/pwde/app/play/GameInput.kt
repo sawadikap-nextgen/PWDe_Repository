@@ -41,6 +41,8 @@ sealed interface GameCommand {
     /** Press and hold at the pointer, then follow the head until [Drop]. */
     object StartDrag : GameCommand
     object Drop : GameCommand
+    /** The drag gesture: [StartDrag] when nothing is held, [Drop] when a drag is. See [GameInput.resolveDrag]. */
+    object ToggleDrag : GameCommand
     object CursorMode : GameCommand
     object JoystickMode : GameCommand
     /** Steer the joystick with the phone's own tilt instead of the head. */
@@ -217,6 +219,17 @@ object GameInput {
         GestureAction.NOTIFICATIONS -> GameCommand.Notifications
         GestureAction.ALL_APPS -> GameCommand.AllApps
         GestureAction.TOUCH_HOLD -> GameCommand.TouchHold
+        GestureAction.DRAG -> GameCommand.ToggleDrag
+    }
+
+    /**
+     * The drag toggle as what it means right now, given whether a drag is [dragging]. Resolved before
+     * any pause check, so the same gesture that picked something up can always put it down.
+     */
+    fun resolveDrag(command: GameCommand, dragging: Boolean): GameCommand = when {
+        command != GameCommand.ToggleDrag -> command
+        dragging -> GameCommand.Drop
+        else -> GameCommand.StartDrag
     }
 
     /** The head joystick settled on [direction]; null when no button is mapped to it. */
@@ -231,7 +244,7 @@ object GameInput {
      * the system actions, the mode switches — works in both modes.
      */
     fun needsPointer(command: GameCommand): Boolean = when (command) {
-        GameCommand.Select, GameCommand.TouchHold, GameCommand.StartDrag -> true
+        GameCommand.Select, GameCommand.TouchHold, GameCommand.StartDrag, GameCommand.ToggleDrag -> true
         is GameCommand.Scroll -> true
         else -> false
     }
