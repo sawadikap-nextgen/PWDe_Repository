@@ -2,7 +2,10 @@ package com.pwde.app.data.prefs
 
 import com.pwde.app.data.model.JoystickSource
 
-/** Local-only user settings. Never synced to the cloud. */
+/**
+ * App-wide user settings. When signed in, everything except [pwdeEnabled] and [usesOtherScreenReader]
+ * (which describe this phone) syncs to the cloud.
+ */
 data class UserSettings(
     val accessibilityNeeds: Set<AccessibilityNeed> = emptySet(),
     val colorScheme: ColorSchemeOption = ColorSchemeOption.DEFAULT,
@@ -18,6 +21,8 @@ data class UserSettings(
     val usesOtherScreenReader: Boolean = false,
     val setupCompleted: Boolean = false,
     val voiceTutorialCompleted: Boolean = false,
+    /** When a synced setting last changed (0 = never), so the newer copy wins in cloud sync. */
+    val updatedAt: Long = 0L,
 )
 
 enum class AccessibilityNeed(val label: String, val description: String) {

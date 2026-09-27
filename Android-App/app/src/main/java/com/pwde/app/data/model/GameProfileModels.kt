@@ -2,12 +2,12 @@ package com.pwde.app.data.model
 
 /** How a mapped on-screen game button gets pressed. */
 enum class TriggerType(val label: String) {
-    VOICE("Voice command"),
-    GESTURE("Head gesture"),
+    VOICE("Voice"),
+    GESTURE("Gestures"),
     JOYSTICK("Joystick action"),
 
     /** This button is the game's movement joystick: in joystick mode PWDe holds it and drags it with the head. */
-    MOVEMENT("Movement joystick"),
+    MOVEMENT("Joystick"),
 }
 
 /**

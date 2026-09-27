@@ -22,10 +22,11 @@ fun LockOrientation(landscape: Boolean) {
         activity?.requestedOrientation =
             if (landscape) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
         onDispose {
-            // Back to the manifest's default (follow the sensor), not the value found on entry: after
-            // the rotation this lock causes, the recreated activity already reports the lock.
+            // Back to the app's portrait layout, not the value found on entry: after the rotation this
+            // lock causes, the recreated activity already reports the lock. Following the sensor
+            // instead left the app sideways while the phone was still held for the game.
             if (activity != null && !activity.isChangingConfigurations) {
-                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             }
         }
     }

@@ -43,6 +43,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pwde.app.data.gabai.Axis
+import com.pwde.app.data.gabai.GabAiFlow
 import com.pwde.app.data.gabai.GabAiState
 import com.pwde.app.data.gabai.JoystickParameter
 import com.pwde.app.data.model.DEFAULT_LEVEL
@@ -110,9 +111,10 @@ fun GabAiScreen(
         }
     }
     if (!ui.loaded) return
-    // From marking the buttons on, the work is on the game's screen: hold the phone the way the game
-    // is played. One call site for all these steps, so moving between them never unlocks and re-locks.
-    if (ui.state.let { it is GabAiState.ButtonMapping || it in GAME_SCREEN_STEPS }) {
+    // From placing buttons to testing them, the work is on the game's screen, so hold the phone the
+    // way the game is played. The lock is released once mapping is done: naming and saving is a form,
+    // and staying in landscape there left the device stuck sideways after the mapping was finished.
+    if (GabAiFlow.locksGameScreenOrientation(ui.state)) {
         LockOrientation(Game.byId(ui.form.gameId)?.landscape ?: true)
     }
     when (val state = ui.state) {
@@ -133,10 +135,6 @@ fun GabAiScreen(
         GabAiState.ProfileSaved -> ProfileSavedStep(viewModel, ui)
     }
 }
-
-private val GAME_SCREEN_STEPS = setOf(
-    GabAiState.AssignTriggers, GabAiState.TestControls, GabAiState.NameAndSaveProfile, GabAiState.ProfileSaved,
-)
 
 /** Shared frame for every GabAI step: GabAI's line on top, then the step's own content. */
 @Composable

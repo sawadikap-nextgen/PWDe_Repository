@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Login
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CloudSync
 import androidx.compose.material.icons.outlined.Delete
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.SportsEsports
+import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -98,7 +100,7 @@ data class ProfileUiState(
 
 class ProfileViewModel(
     private val authRepository: AuthRepository,
-    syncRepository: SyncRepository,
+    private val syncRepository: SyncRepository,
     private val profileRepository: ProfileRepository,
     private val controlsRepository: ControlsRepository,
     private val settingsRepository: SettingsRepository,
@@ -134,6 +136,10 @@ class ProfileViewModel(
 
     /** Signing out never deletes local profiles. */
     fun signOut() = authRepository.signOut()
+
+    fun syncNow() {
+        viewModelScope.launch { syncRepository.syncNow() }
+    }
 
     fun rename(profile: SavedProfile, name: String) {
         val trimmed = name.trim()
@@ -260,7 +266,7 @@ fun ProfileScreen(
             }
         }
 
-        SyncCard(state, onSignIn, viewModel::signOut)
+        SyncCard(state, onSignIn, viewModel::signOut, viewModel::syncNow)
 
         SectionTitle("Calibration profiles")
         if (state.calibrationProfiles.isEmpty()) {
@@ -527,13 +533,13 @@ private fun DeleteDialog(profile: SavedProfile, onDismiss: () -> Unit, onConfirm
         onDismissRequest = onDismiss,
         containerColor = PwdeTheme.colors.surface,
         title = { Text("Delete \"${profile.name}\"?", color = PwdeTheme.colors.text) },
-        text = { Text("This removes it from this phone. It can't be undone.", color = PwdeTheme.colors.textMuted) },
+        text = { Text("This removes it from this phone, and from your account if you're signed in. It can't be undone.", color = PwdeTheme.colors.textMuted) },
         confirmButton = { PwdeButton("Delete", onConfirm, style = ButtonStyle.DESTRUCTIVE, contentPadding = buttonPadding()) },
         dismissButton = { PwdeButton("Keep it", onDismiss, style = ButtonStyle.SECONDARY, contentPadding = buttonPadding()) },
     )
 }
 @Composable
-private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () -> Unit) {
+private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () -> Unit, onSyncNow: () -> Unit) {
     val colors = PwdeTheme.colors
     val spacing = PwdeTheme.spacing
     // Same card padding and item gaps as the profile cards; every child is spaced evenly.
@@ -557,19 +563,38 @@ private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () 
                         StatusPill("Accounts aren't set up in this build", color = colors.textMuted, icon = Icons.Outlined.CloudOff)
                     }
                 }
-                SyncStatus.NotAvailable -> {
+                else -> {
+                    val signedIn = state.auth as? AuthState.SignedIn
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(spacing.itemGap)) {
                         IconBadge(Icons.Outlined.CloudSync)
                         Column(Modifier.weight(1f)) {
                             Text("Sync status", style = MaterialTheme.typography.titleMedium, color = colors.text)
-                            StatusPill("Cloud sync not available yet", color = colors.warning, icon = Icons.Outlined.CloudOff)
+                            signedIn?.email?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textMuted)
+                            }
                         }
                     }
+                    when (val status = state.syncStatus) {
+                        SyncStatus.Syncing -> StatusPill("Syncing…", icon = Icons.Outlined.CloudSync)
+                        is SyncStatus.Synced -> StatusPill(
+                            status.at?.let { "Synced ${syncTimeLabel(it)}" } ?: "Not synced yet",
+                            icon = Icons.Outlined.CloudDone,
+                        )
+                        is SyncStatus.Error -> StatusPill("Sync didn't finish", color = colors.warning, icon = Icons.Outlined.CloudOff)
+                        else -> StatusPill("Cloud sync isn't set up in this build", color = colors.warning, icon = Icons.Outlined.CloudOff)
+                    }
                     Text(
-                        "You're signed in. Your profiles are safe on this phone; syncing them to the cloud is coming in a later update.",
+                        when (val status = state.syncStatus) {
+                            is SyncStatus.Error -> status.message
+                            SyncStatus.NotAvailable -> "You're signed in. Your profiles are safe on this phone."
+                            else -> "Your profiles, controls and settings sync to your account on their own. Nothing here is lost when you sign out."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textMuted,
                     )
+                    if (state.syncStatus != SyncStatus.NotAvailable) {
+                        SyncActionButton("Sync now", Icons.Outlined.Sync, onSyncNow, enabled = state.syncStatus != SyncStatus.Syncing)
+                    }
                     SyncActionButton("Sign out", Icons.AutoMirrored.Outlined.Logout, onSignOut)
                 }
             }
@@ -583,13 +608,24 @@ private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () 
  * the long label on one line on most phones.
  */
 @Composable
-private fun SyncActionButton(text: String, icon: ImageVector, onClick: () -> Unit) {
+private fun SyncActionButton(text: String, icon: ImageVector, onClick: () -> Unit, enabled: Boolean = true) {
     PwdeButton(
         text,
         onClick,
+        enabled = enabled,
         style = ButtonStyle.SECONDARY,
         icon = icon,
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = PwdeTheme.spacing.screenMargin, vertical = PwdeTheme.spacing.section),
     )
+}
+
+/** "just now", "5 min ago", or the time of day for older syncs. */
+private fun syncTimeLabel(at: Long, now: Long = System.currentTimeMillis()): String {
+    val minutes = (now - at) / 60_000
+    return when {
+        minutes < 1 -> "just now"
+        minutes < 60 -> "$minutes min ago"
+        else -> "at " + java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(at))
+    }
 }

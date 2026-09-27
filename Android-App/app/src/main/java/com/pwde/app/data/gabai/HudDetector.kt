@@ -110,7 +110,7 @@ fun detectedToButtons(detected: List<DetectedButton>, firstId: Int): List<Mapped
     val counts = mutableMapOf<String, Int>()
     var id = firstId
     return sorted.map { d ->
-        if (d === movement) return@map MappedButton(id++, "Movement joystick", d.x, d.y, ButtonTrigger.MOVEMENT)
+        if (d === movement) return@map MappedButton(id++, "Joystick", d.x, d.y, ButtonTrigger.MOVEMENT)
         val base = d.className.replace('_', ' ').replaceFirstChar { it.uppercase() }
         val n = (counts[d.className] ?: 0) + 1
         counts[d.className] = n

@@ -16,7 +16,18 @@ import com.pwde.app.data.media.TutorialPlayer
 import com.pwde.app.data.prefs.DataStoreSettingsRepository
 import com.pwde.app.data.prefs.SettingsRepository
 import com.pwde.app.data.remote.AuthRepository
+import com.google.firebase.firestore.FirebaseFirestore
+import com.pwde.app.data.remote.CloudSyncEngine
+import com.pwde.app.data.remote.FirestoreCloudStore
+import com.pwde.app.data.remote.FirestoreSyncRepository
 import com.pwde.app.data.remote.NoOpSyncRepository
+import com.pwde.app.data.remote.SharedPrefsSyncLedger
+import com.pwde.app.data.remote.SyncLedger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import com.pwde.app.data.remote.SyncRepository
 import com.pwde.app.data.speech.SpeechOutput
 import com.pwde.app.data.prefs.ButtonOverlayPrefs
@@ -43,14 +54,58 @@ private val Context.customGamesDataStore by preferencesDataStore(name = "custom_
 class AppContainer(private val context: Context) {
     private val database by lazy { PwdeDatabase.create(context) }
 
+    /** For app-lifetime background work (cloud sync). */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val syncLedger: SyncLedger by lazy { SharedPrefsSyncLedger(context) }
+
     val settingsRepository: SettingsRepository by lazy { DataStoreSettingsRepository(context.settingsDataStore) }
     val customGamesRepository: CustomGamesRepository by lazy { DataStoreCustomGamesRepository(context.customGamesDataStore) }
     val profileRepository by lazy {
-        ProfileRepository(database.calibrationProfileDao(), database.gameProfileDao())
+        ProfileRepository(
+            database.calibrationProfileDao(),
+            database.gameProfileDao(),
+            onRemoteDelete = { collection, remoteId -> syncLedger.recordDelete(collection, remoteId) },
+        )
     }
     val controlsRepository by lazy { ControlsRepository(database.controlSettingsDao(), profileRepository = profileRepository) }
     val authRepository: AuthRepository by lazy { AuthRepository.create(context) }
-    val syncRepository: SyncRepository by lazy { NoOpSyncRepository(authRepository) }
+    /**
+     * Firestore sync of profiles, controls, settings and added games while signed in; a no-op in builds
+     * without Firebase. Created at app start (see [com.pwde.app.PwdeApplication]) so it syncs on its own.
+     */
+    val syncRepository: SyncRepository by lazy {
+        val firestore = if (authRepository.isCloudAvailable) {
+            AuthRepository.firebaseApp(context)?.let { runCatching { FirebaseFirestore.getInstance(it) }.getOrNull() }
+        } else {
+            null
+        }
+        if (firestore == null) {
+            NoOpSyncRepository(authRepository)
+        } else {
+            val localChanges = combine(
+                profileRepository.calibrationProfiles,
+                profileRepository.gameProfiles,
+                controlsRepository.config,
+                settingsRepository.settings,
+                customGamesRepository.names,
+            ) { _, _, _, _, _ -> }.drop(1)
+            FirestoreSyncRepository(
+                authRepository,
+                CloudSyncEngine(
+                    FirestoreCloudStore(firestore),
+                    profileRepository,
+                    controlsRepository,
+                    settingsRepository,
+                    customGamesRepository,
+                    syncLedger,
+                ),
+                syncLedger,
+                localChanges,
+                appScope,
+            )
+        }
+    }
     val speechOutput by lazy { SpeechOutput(context) }
 
     /** Camera + MediaPipe head/face tracking (motion-sensor demo mode when the camera can't be used). */

@@ -12,5 +12,7 @@ class PwdeApplication : Application() {
         container = AppContainer(this)
         // "Is the user in PWDe?" — the accessibility service and the voice split both read this.
         registerActivityLifecycleCallbacks(container.pwdeVisibility)
+        // Starts cloud sync: it syncs on sign-in and after local changes, with no screen open.
+        container.syncRepository
     }
 }

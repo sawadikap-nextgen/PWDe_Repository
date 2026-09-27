@@ -7,6 +7,7 @@ plugins {
 }
 
 // Optional Firebase config. Leave these out of local.properties and the app runs guest-only.
+// All three are needed for cloud sync (Firestore needs the project id); see firebase/README.md.
 //   pwde.firebase.apiKey=...
 //   pwde.firebase.appId=...
 //   pwde.firebase.projectId=...
@@ -97,6 +98,8 @@ dependencies {
     implementation(libs.androidx.media3.ui)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.gson)
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)

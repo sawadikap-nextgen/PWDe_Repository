@@ -1,0 +1,23 @@
+rules_version = '2';
+
+// PWDe cloud sync. Each signed-in user reads and writes only their own tree:
+//   users/{uid}                              account summary (email, last sync)
+//   users/{uid}/calibrationProfiles/{id}     saved control tunings
+//   users/{uid}/gameProfiles/{id}            per-game button mappings
+//   users/{uid}/state/{controls|settings|customGames}
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      match /{collection}/{docId} {
+        allow read, write: if isOwner(uid)
+          && collection in ['calibrationProfiles', 'gameProfiles', 'state'];
+      }
+    }
+  }
+}

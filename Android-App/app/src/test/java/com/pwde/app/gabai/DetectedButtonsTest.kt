@@ -16,7 +16,7 @@ class DetectedButtonsTest {
             listOf(detected("skill_button", 0.8f, 0.7f), detected("joystick", 0.15f, 0.75f), detected("basic_attack", 0.9f, 0.85f)),
             firstId = 5,
         )
-        val stick = buttons.single { it.label == "Movement joystick" }
+        val stick = buttons.single { it.label == "Joystick" }
         assertEquals(ButtonTrigger.MOVEMENT, stick.trigger)
         assertEquals(0.15f, stick.x, 0f)
         // Everything else still waits for the user to choose a trigger.
@@ -44,7 +44,7 @@ class DetectedButtonsTest {
             firstId = 1,
         )
         assertEquals(
-            listOf("Movement joystick", "Recall", "Regen", "Spell", "Basic attack", "Skill button", "Skill upgrade", "Buy item", "Use item"),
+            listOf("Joystick", "Recall", "Regen", "Spell", "Basic attack", "Skill button", "Skill upgrade", "Buy item", "Use item"),
             buttons.map { it.label },
         )
     }
