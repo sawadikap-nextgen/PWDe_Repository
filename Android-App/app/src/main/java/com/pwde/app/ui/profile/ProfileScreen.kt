@@ -362,7 +362,8 @@ private fun CalibrationProfileCarousel(
     onEdit: (Long) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
-    val shown = if (expanded) profiles else profiles.take(RECENT_CALIBRATIONS)
+    val newestFirst = remember(profiles) { profiles.sortedWith(compareByDescending<CalibrationProfile> { it.createdAt }.thenByDescending { it.id }) }
+    val shown = if (expanded) newestFirst else newestFirst.take(RECENT_CALIBRATIONS)
     Column(verticalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
         shown.forEach { profile ->
             val active = profile.id == activeProfileId

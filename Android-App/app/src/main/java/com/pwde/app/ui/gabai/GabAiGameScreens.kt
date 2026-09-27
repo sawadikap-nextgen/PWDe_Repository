@@ -50,6 +50,7 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import com.pwde.app.ui.profile.RECENT_CALIBRATIONS
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import com.pwde.app.data.local.CalibrationProfile
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -133,7 +134,7 @@ internal fun ConfirmCalibrationStep(viewModel: GabAiViewModel, ui: GabAiUiState)
     val profiles by viewModel.calibrationProfiles.collectAsStateWithLifecycle()
     val selected = ui.form.calibrationProfileId
     // Start open when the picked profile is an older one, so it stays visible.
-    var showAll by rememberSaveable { mutableStateOf(profiles.drop(RECENT_CALIBRATIONS).any { it.id == selected }) }
+    var showAll by rememberSaveable { mutableStateOf(profiles.sortedWith(compareByDescending<CalibrationProfile> { it.createdAt }.thenByDescending { it.id }).drop(RECENT_CALIBRATIONS).any { it.id == selected }) }
     VoiceCommandsEffect(CONFIRM_COMMANDS) { id -> if (id == "use") viewModel.confirmCalibration() else viewModel.calibrateForThisGame() }
     GabAiStep(
         viewModel, ui,
@@ -147,7 +148,8 @@ internal fun ConfirmCalibrationStep(viewModel: GabAiViewModel, ui: GabAiUiState)
         },
     ) {
         Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
-            val shown = if (showAll) profiles else profiles.take(RECENT_CALIBRATIONS)
+            val newestFirst = remember(profiles) { profiles.sortedWith(compareByDescending<CalibrationProfile> { it.createdAt }.thenByDescending { it.id }) }
+            val shown = if (showAll) newestFirst else newestFirst.take(RECENT_CALIBRATIONS)
             shown.forEach { profile ->
                 OptionCard(
                     profile.name,

@@ -33,7 +33,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.runtime.remember
+import com.pwde.app.data.local.GameProfile
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -247,13 +253,27 @@ private fun WelcomeStep(viewModel: GabAiViewModel, ui: GabAiUiState, onTab: (Mai
             InfoNote("Nothing unfinished to continue. Anything you start is saved step by step, so you can always come back to it.")
         }
         if (gameProfiles.isNotEmpty()) {
-            SectionTitle("Edit a saved game profile")
-            gameProfiles.forEach { profile ->
+            var showAll by rememberSaveable { mutableStateOf(false) }
+            val newestFirst = remember(gameProfiles) { gameProfiles.sortedWith(compareByDescending<GameProfile> { it.createdAt }.thenByDescending { it.id }) }
+            SectionTitle(if (showAll) "Edit a saved game profile" else "Edit a recent game profile")
+            (if (showAll) newestFirst else newestFirst.take(RECENT_GAME_PROFILES)).forEach { profile ->
                 NavCard(profile.profileName, profile.gameName, Icons.Outlined.SportsEsports, { viewModel.editGameProfile(profile.id) })
+            }
+            if (gameProfiles.size > RECENT_GAME_PROFILES) {
+                PwdeButton(
+                    if (showAll) "Show recent only" else "Show all ${gameProfiles.size} profiles",
+                    { showAll = !showAll },
+                    style = ButtonStyle.SECONDARY,
+                    icon = if (showAll) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
 }
+
+/** How many of the newest game profiles GabAI lists before "Show all". */
+private const val RECENT_GAME_PROFILES = 3
 
 // ---------------- Calibration branch ----------------
 
