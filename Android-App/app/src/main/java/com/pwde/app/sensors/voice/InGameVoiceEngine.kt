@@ -165,6 +165,7 @@ class SpeechRecognizerInGameVoiceEngine(
         override fun onLevel(level: Float) = updateState { it.copy(level = level) }
         override fun onUtteranceAborted() = this@SpeechRecognizerInGameVoiceEngine.onUtteranceAborted()
         override fun onUnavailable(reason: MicAvailability) = updateState { it.copy(availability = reason, listening = false) }
+        override fun onRecovered() = updateState { it.copy(availability = MicAvailability.AVAILABLE) }
         override fun onHeard(hypotheses: List<String>, confidences: FloatArray?, isFinal: Boolean) =
             onTranscript(hypotheses, confidences, isFinal)
     })

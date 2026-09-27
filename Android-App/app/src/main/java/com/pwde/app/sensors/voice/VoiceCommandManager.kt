@@ -132,6 +132,7 @@ class AndroidVoiceCommandManager(
             scheduleHistoryClear()
         }
         override fun onUnavailable(reason: MicAvailability) = _state.update { it.copy(availability = reason) }
+        override fun onRecovered() = _state.update { it.copy(availability = MicAvailability.AVAILABLE) }
 
         override fun onHeard(hypotheses: List<String>, confidences: FloatArray?, isFinal: Boolean) {
             val words = hypotheses.map(::words)

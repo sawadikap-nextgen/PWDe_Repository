@@ -54,29 +54,43 @@ class ContinuousSpeechRecognizer(
         /** The current utterance ended without a final result (silence, error). */
         fun onUtteranceAborted()
 
-        /** Listening stopped for good until [start] is called again. */
+        /**
+         * Listening is not working: [MicAvailability.NO_PERMISSION] and [MicAvailability.NO_RECOGNIZER]
+         * stop it until [start] is called again; [MicAvailability.SERVICE_ERROR] keeps retrying slowly
+         * and ends with [onRecovered].
+         */
         fun onUnavailable(reason: MicAvailability)
+
+        /** A session started again after [onUnavailable] reported [MicAvailability.SERVICE_ERROR]. */
+        fun onRecovered() = Unit
     }
 
     private val appContext = context.applicationContext
     private var recognizer: SpeechRecognizer? = null
     private var wanted = false
     private var restartJob: Job? = null
+    private var watchdogJob: Job? = null
     private var consecutiveErrors = 0
+    private var failing = false
 
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
 
+    /**
+     * Only what retrying cannot fix. A recognition service that keeps failing is not in here: the
+     * callers stop listening on anything but AVAILABLE, and a stopped recognizer never finds out the
+     * service came back — voice stayed dead until the user turned it off and on again.
+     */
     fun availability(): MicAvailability = when {
         !hasMicPermission(appContext) -> MicAvailability.NO_PERMISSION
         !SpeechRecognizer.isRecognitionAvailable(appContext) -> MicAvailability.NO_RECOGNIZER
-        consecutiveErrors >= MAX_CONSECUTIVE_ERRORS -> MicAvailability.SERVICE_ERROR
         else -> MicAvailability.AVAILABLE
     }
 
     /** Forget past failures, e.g. after the user re-grants permission or turns voice back on. */
     fun resetErrors() {
         consecutiveErrors = 0
+        failing = false
     }
 
     fun start() {
@@ -90,11 +104,8 @@ class ContinuousSpeechRecognizer(
         wanted = false
         _running.value = false
         restartJob?.cancel()
-        recognizer?.let {
-            it.cancel()
-            it.destroy()
-        }
-        recognizer = null
+        watchdogJob?.cancel()
+        discardRecognizer()
         listener.onListening(false)
         listener.onLevel(0f)
     }
@@ -110,9 +121,48 @@ class ContinuousSpeechRecognizer(
             giveUp(MicAvailability.NO_RECOGNIZER)
             return
         }
+        armWatchdog()
         runCatching { r.startListening(intent()) }.onFailure {
             Log.w(TAG, "startListening failed", it)
             onError(SpeechRecognizer.ERROR_CLIENT)
+        }
+    }
+
+    /**
+     * The recognition service sometimes simply goes quiet: no result, no error, nothing — after it
+     * was updated or killed in the background, or after the mic was taken from it. Nothing then ever
+     * restarts the session, so voice is dead until the user toggles it. Any callback re-arms this;
+     * [SESSION_STALL_MS] without one throws the recognizer away and starts a fresh one.
+     */
+    private fun armWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = scope.launch {
+            delay(SESSION_STALL_MS)
+            if (!wanted) return@launch
+            Log.w(TAG, "No word from the recognition service in ${SESSION_STALL_MS}ms — starting a new recognizer")
+            discardRecognizer()
+            listener.onListening(false)
+            listener.onLevel(0f)
+            listener.onUtteranceAborted()
+            restartAfter(RESTART_DELAY_MS)
+        }
+    }
+
+    private fun discardRecognizer() {
+        recognizer?.let {
+            runCatching { it.cancel() }
+            runCatching { it.destroy() }
+        }
+        recognizer = null
+    }
+
+    /** The service answered, so it is alive: forget past failures and say so if they were reported. */
+    private fun onAlive() {
+        consecutiveErrors = 0
+        if (failing) {
+            failing = false
+            Log.i(TAG, "The recognition service is working again")
+            listener.onRecovered()
         }
     }
 
@@ -146,53 +196,77 @@ class ContinuousSpeechRecognizer(
     }
 
     private fun onError(error: Int) {
+        watchdogJob?.cancel()
         listener.onListening(false)
         listener.onLevel(0f)
         listener.onUtteranceAborted()
         if (!wanted) return
         when (error) {
             SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                consecutiveErrors = 0
+                onAlive()
                 restartAfter(RESTART_DELAY_MS)
             }
             SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> giveUp(MicAvailability.NO_PERMISSION)
-            SpeechRecognizer.ERROR_RECOGNIZER_BUSY, SpeechRecognizer.ERROR_CLIENT -> {
-                recognizer?.destroy()
-                recognizer = null
+            else -> {
+                Log.w(TAG, "Recognition error $error — retrying with a new recognizer")
+                // Server disconnected, busy, client, audio, network…: the instance is often dead
+                // after these (its binding to the service is gone), so reusing it just fails again.
+                discardRecognizer()
                 countFailureAndRetry()
             }
-            else -> countFailureAndRetry()
         }
     }
 
+    /**
+     * Back off, then keep trying. Past [MAX_CONSECUTIVE_ERRORS] the failure is reported, but listening
+     * does not stop: Google's service comes back on its own (an update, a network drop, the mic freed
+     * by another app) and the next working session clears it via [onAlive].
+     */
     private fun countFailureAndRetry() {
         consecutiveErrors++
-        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) giveUp(MicAvailability.SERVICE_ERROR)
-        else restartAfter(min(MAX_BACKOFF_MS, RESTART_DELAY_MS shl consecutiveErrors))
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS && !failing) {
+            failing = true
+            listener.onUnavailable(MicAvailability.SERVICE_ERROR)
+        }
+        restartAfter(if (failing) FAILING_RETRY_MS else min(MAX_BACKOFF_MS, RESTART_DELAY_MS shl consecutiveErrors))
     }
 
     private val callbacks = object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) = listener.onListening(true)
-        override fun onBeginningOfSpeech() = listener.onUtteranceStarted()
+        override fun onReadyForSpeech(params: Bundle?) {
+            // Not onAlive(): a service that gets ready and then fails every session is still failing.
+            armWatchdog()
+            listener.onListening(true)
+        }
+
+        override fun onBeginningOfSpeech() {
+            armWatchdog()
+            listener.onUtteranceStarted()
+        }
 
         // Typical rmsdB runs from about -2 (silence) to 10 (loud speech).
         override fun onRmsChanged(rmsdB: Float) = listener.onLevel(((rmsdB + 2f) / 12f).coerceIn(0f, 1f))
         override fun onBufferReceived(buffer: ByteArray?) = Unit
         override fun onEndOfSpeech() {
+            armWatchdog()
             listener.onLevel(0f)
             listener.onUtteranceEnded()
         }
         override fun onError(error: Int) = this@ContinuousSpeechRecognizer.onError(error)
 
         override fun onResults(results: Bundle?) {
-            consecutiveErrors = 0
+            watchdogJob?.cancel()
+            onAlive()
             heard(results, isFinal = true)
             listener.onListening(false)
             listener.onLevel(0f)
             if (wanted) restartAfter(RESTART_DELAY_MS)
         }
 
-        override fun onPartialResults(partialResults: Bundle?) = heard(partialResults, isFinal = false)
+        override fun onPartialResults(partialResults: Bundle?) {
+            armWatchdog()
+            heard(partialResults, isFinal = false)
+        }
+
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
     }
 
@@ -201,6 +275,15 @@ class ContinuousSpeechRecognizer(
         private const val RESTART_DELAY_MS = 250L
         private const val MAX_BACKOFF_MS = 4_000L
         private const val MAX_CONSECUTIVE_ERRORS = 6
+
+        /** Retry spacing once the service has been reported as failing. */
+        private const val FAILING_RETRY_MS = 10_000L
+
+        /**
+         * Longest a session may go without any callback but the level meter. Google ends a silent
+         * session itself with ERROR_SPEECH_TIMEOUT well before this, and every partial re-arms it.
+         */
+        private const val SESSION_STALL_MS = 15_000L
 
         fun hasMicPermission(context: Context) =
             ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
