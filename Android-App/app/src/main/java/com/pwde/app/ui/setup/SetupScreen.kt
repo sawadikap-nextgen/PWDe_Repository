@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,7 +31,6 @@ import androidx.compose.material.icons.outlined.CenterFocusStrong
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Hearing
-import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.PhotoCamera
@@ -75,6 +76,7 @@ import com.pwde.app.data.prefs.LayoutMode
 import com.pwde.app.data.prefs.TextSizeOption
 import com.pwde.app.ui.components.ButtonStyle
 import com.pwde.app.ui.components.CameraFeed
+import com.pwde.app.ui.components.CalibrationOverlayMode
 import com.pwde.app.ui.components.DemoModeBanner
 import com.pwde.app.ui.components.FooterActions
 import com.pwde.app.ui.components.GradientCard
@@ -87,10 +89,8 @@ import com.pwde.app.ui.components.PwdeScreen
 import com.pwde.app.ui.components.SectionTitle
 import com.pwde.app.ui.components.StatusPill
 import com.pwde.app.ui.components.StepProgress
-import com.pwde.app.ui.components.SwitchRow
 import com.pwde.app.ui.components.VoiceCommandsEffect
-import com.pwde.app.ui.components.rememberCameraPermissionRequest
-import com.pwde.app.ui.components.rememberMicPermissionRequest
+import com.pwde.app.ui.components.rememberCalibrationOverlay
 import com.pwde.app.ui.components.voiceCommand
 import com.pwde.app.ui.theme.MinTouchTarget
 import com.pwde.app.ui.theme.PwdeShapes
@@ -108,15 +108,8 @@ private val SETUP_COMMANDS = listOf(
 
 private val PERMISSION_COMMANDS = listOf(
     voiceCommand("allow", "allow"),
-    voiceCommand("camera", "allow camera", "camera"),
-    voiceCommand("mic", "allow microphone", "microphone"),
     voiceCommand("accessibility", "allow accessibility service", "accessibility service", "accessibility"),
-    voiceCommand("overlay", "allow display over apps", "display over apps", "display"),
     voiceCommand("app_settings", "open app settings"),
-)
-
-private val TURN_ON_COMMANDS = listOf(
-    voiceCommand("open_settings", "open settings", "use pwde"),
 )
 
 /** Just the axis-tuning phrases; "next"/"continue" is handled once, by [SETUP_COMMANDS]. */
@@ -143,6 +136,19 @@ fun SetupScreen(viewModel: SetupViewModel, onExit: () -> Unit, onFinished: () ->
     BackHandler { if (!viewModel.back()) onExit() }
     if (!state.loaded) return
 
+    // The permissions step asks Android itself as soon as it opens, and keeps the app on that step
+    // until camera and microphone are allowed, so its launchers live up here where they outlive the
+    // step's own state. Two single-permission requests, not one combined dialog: the camera has to
+    // come first on its own so the step after this one boots a head-tracked pointer rather than gyro.
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        viewModel.setPermissions(cameraGranted = granted, micGranted = viewModel.state.value.micGranted)
+    }
+    val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        viewModel.setPermissions(cameraGranted = viewModel.state.value.cameraGranted, micGranted = granted)
+    }
+    val requestCamera = remember(cameraLauncher) { { cameraLauncher.launch(Manifest.permission.CAMERA) } }
+    val requestMic = remember(micLauncher) { { micLauncher.launch(Manifest.permission.RECORD_AUDIO) } }
+
     PwdeTheme(colorScheme = state.colorScheme, textSize = state.textSize, layoutMode = state.layoutMode) {
         val (title, subtitle, hint) = when (state.step) {
             SetupStep.APPEARANCE -> Triple(
@@ -157,13 +163,8 @@ fun SetupScreen(viewModel: SetupViewModel, onExit: () -> Unit, onFinished: () ->
             )
             SetupStep.PERMISSIONS -> Triple(
                 "Allow camera and microphone",
-                "PWDe uses them to follow your head, face and voice. Everything stays on this phone.",
-                "Say \"allow camera\" or \"allow microphone\"",
-            )
-            SetupStep.TURN_ON -> Triple(
-                "Turn on PWDe in Settings",
-                "Android needs you to switch PWDe on once so its controls work while you play.",
-                "Say \"open settings\"",
+                "PWDe asks Android for the camera first, then the microphone, as soon as this screen opens. Both are needed for head and voice control.",
+                "Say \"allow\" to ask again",
             )
             SetupStep.CURSOR_CALIBRATION -> Triple(
                 "Calibrate your cursor",
@@ -186,8 +187,9 @@ fun SetupScreen(viewModel: SetupViewModel, onExit: () -> Unit, onFinished: () ->
                     },
                     onPrimary = if (onCursorStep) viewModel::axisDone else viewModel::continueStep,
                     primaryIcon = if (state.isLastStep && (!onCursorStep || onLastAxis)) Icons.Outlined.Check else null,
-                    secondaryText = "Skip",
-                    onSecondary = viewModel::skipStep,
+                    secondaryText = if (state.permissionBlocked) null else "Skip",
+                    onSecondary = if (state.permissionBlocked) null else viewModel::skipStep,
+                    primaryEnabled = !state.permissionBlocked,
                 )
             },
         ) {
@@ -195,11 +197,14 @@ fun SetupScreen(viewModel: SetupViewModel, onExit: () -> Unit, onFinished: () ->
                 StepProgress(step = state.stepIndex + 1, total = state.steps.size, label = state.step.label)
             }
             when (state.step) {
-                SetupStep.TURN_ON -> TurnOnStep()
-                SetupStep.NEEDS -> NeedsStep(state.needs, viewModel::toggleNeed)
-                SetupStep.PERMISSIONS -> PermissionsStep()
+                SetupStep.PERMISSIONS -> PermissionsStep(
+                    onGranted = viewModel::setPermissions,
+                    requestCamera = requestCamera,
+                    requestMic = requestMic,
+                )
                 SetupStep.APPEARANCE -> AppearanceStep(state, viewModel)
                 SetupStep.CURSOR_CALIBRATION -> CursorCalibrationStep(state, viewModel)
+                SetupStep.NEEDS -> NeedsStep(state.needs, viewModel::toggleNeed)
             }
         }
     }
@@ -317,69 +322,80 @@ private fun ColorSchemeTile(option: ColorSchemeOption, selected: Boolean, onClic
 }
 
 /**
- * B5 · Permissions. Each card asks Android for one permission; a tick means it's granted.
- * Re-checked on resume so changes made in Android Settings show up. Both stay optional.
+ * B5 · Permissions — the single place setup asks for everything Android has to grant: the camera,
+ * the microphone and the accessibility service ("Use PWDe"), which together are what turns PWDe on.
+ *
+ * The camera is asked for **first** and on its own, so the cursor is already head-tracked and never
+ * falls back to gyro when the calibration step boots it; the microphone follows. Camera and
+ * microphone are required — the step reports them with [onGranted] and setup refuses to continue
+ * while either is off — while the accessibility service is asked for on the same screen but stays
+ * optional, since Android only lets the user flip "Use PWDe" in its own Settings.
  */
 @Composable
-private fun PermissionsStep() {
+private fun PermissionsStep(
+    onGranted: (camera: Boolean, mic: Boolean) -> Unit,
+    requestCamera: () -> Unit,
+    requestMic: () -> Unit,
+) {
     val context = LocalContext.current
     var camera by remember { mutableStateOf(context.isGranted(Manifest.permission.CAMERA)) }
     var mic by remember { mutableStateOf(context.isGranted(Manifest.permission.RECORD_AUDIO)) }
     var accessibility by remember { mutableStateOf(PwdeAccessibilityService.isEnabled(context)) }
-    var overlay by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
-    var denied by rememberSaveable { mutableStateOf(false) }
+    /** Android has already shown its dialog for this visit, so asking again may be silently refused. */
+    var asked by rememberSaveable { mutableStateOf(false) }
+    // Ask as soon as the step opens. The camera goes first, alone: the calibration step that
+    // follows boots the pointer, and it needs a camera to find a face with rather than tilt.
+    LaunchedEffect(Unit) {
+        when {
+            !camera -> {
+                asked = true
+                requestCamera()
+            }
+            !mic -> {
+                asked = true
+                requestMic()
+            }
+        }
+    }
+    // Once the camera has been dealt with, the microphone is the next thing to ask for.
+    LaunchedEffect(camera) {
+        if (camera && !mic) {
+            asked = true
+            requestMic()
+        }
+    }
     LifecycleResumeEffect(Unit) {
         camera = context.isGranted(Manifest.permission.CAMERA)
         mic = context.isGranted(Manifest.permission.RECORD_AUDIO)
         accessibility = PwdeAccessibilityService.isEnabled(context)
-        overlay = Settings.canDrawOverlays(context)
+        onGranted(camera, mic)
         onPauseOrDispose { }
     }
-    val requestCamera = rememberCameraPermissionRequest { granted ->
-        camera = granted
-        if (!granted) denied = true
-    }
-    val requestMic = rememberMicPermissionRequest { granted ->
-        mic = granted
-        if (!granted) denied = true
-    }
+    // Every change in either switch re-reports, so the gate (and the footer) stay in step.
+    LaunchedEffect(camera, mic) { onGranted(camera, mic) }
     val openAccessibilitySettings = { context.startActivity(PwdeAccessibilityService.settingsIntent()) }
-    val openOverlaySettings = {
-        context.startActivity(
-            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    }
     val openAppSettings = {
         context.startActivity(
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }
-    // Say "allow" to open whichever of these isn't granted yet, in this order.
-    val openNext = {
-        when {
-            !camera -> requestCamera()
-            !mic -> requestMic()
-            !accessibility -> openAccessibilitySettings()
-            !overlay -> openOverlaySettings()
-            else -> Unit
-        }
-    }
     VoiceCommandsEffect(PERMISSION_COMMANDS) { id ->
         when (id) {
-            "allow" -> openNext()
-            "camera" -> if (!camera) requestCamera()
-            "mic" -> if (!mic) requestMic()
+            "allow" -> when {
+                !camera -> requestCamera()
+                !mic -> requestMic()
+                !accessibility -> openAccessibilitySettings()
+                else -> Unit
+            }
             "accessibility" -> if (!accessibility) openAccessibilitySettings()
-            "overlay" -> if (!overlay) openOverlaySettings()
             "app_settings" -> openAppSettings()
         }
     }
 
     OptionCard(
         title = "Camera",
-        description = if (camera) "Allowed" else "Follows your head and face. Video never leaves this phone.",
+        description = if (camera) "Allowed — the pointer follows your head" else "Asked for first. The pointer follows your head, not the phone's tilt.",
         selected = camera,
         onClick = { if (!camera) requestCamera() },
         icon = Icons.Outlined.PhotoCamera,
@@ -393,73 +409,37 @@ private fun PermissionsStep() {
     )
     OptionCard(
         title = "Accessibility service",
-        description = if (accessibility) "Allowed" else "Lets PWDe press buttons in games",
+        description = if (accessibility) "Allowed — PWDe is on" else "Also called \"Use PWDe\". Lets PWDe press buttons in games",
         selected = accessibility,
         onClick = { if (!accessibility) openAccessibilitySettings() },
         icon = Icons.AutoMirrored.Outlined.Accessible,
     )
-    OptionCard(
-        title = "Display over apps",
-        description = if (overlay) "Allowed" else "Shows your controls on top of games",
-        selected = overlay,
-        onClick = { if (!overlay) openOverlaySettings() },
-        icon = Icons.Outlined.Layers,
-    )
     InfoNote("Your face never leaves this phone. Nothing is recorded or uploaded.", icon = Icons.Outlined.Shield)
-    if (denied && !(camera && mic)) {
-        InfoNote("Android didn't allow one of these. You can turn it on in app settings, or skip — PWDe falls back to a demo mode and typed commands.")
-        PwdeButton("Open app settings", openAppSettings, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.Settings, modifier = Modifier.fillMaxWidth())
-    } else if (!(camera && mic)) {
-        InfoNote("Tap a card to allow it. Both are optional and you can change them later.")
+    if (camera && mic) {
+        StatusPill("Camera and microphone allowed", color = PwdeTheme.colors.success, icon = Icons.Outlined.Check)
+    } else {
+        InfoNote("PWDe can't follow your head or hear commands without both. Allow camera and microphone to continue.")
+        if (asked) {
+            PwdeButton(
+                "Open app settings",
+                openAppSettings,
+                style = ButtonStyle.SECONDARY,
+                icon = Icons.Outlined.Settings,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+    if (!accessibility) {
+        InfoNote(
+            "Turn the accessibility service on too, or PWDe's controls can't reach your games. " +
+                "It opens Android Settings — come back and this screen updates by itself.",
+            icon = Icons.Outlined.Settings,
+        )
     }
 }
 
 private fun Context.isGranted(permission: String): Boolean =
     ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
-
-/**
- * B6 · Turn on PWDe in Settings. Android only lets the user flip "Use PWDe" themselves, so the
- * switch opens Accessibility settings and mirrors the real state when they come back.
- */
-@Composable
-private fun TurnOnStep() {
-    val context = LocalContext.current
-    val colors = PwdeTheme.colors
-    var enabled by remember { mutableStateOf(PwdeAccessibilityService.isEnabled(context)) }
-    LifecycleResumeEffect(Unit) {
-        enabled = PwdeAccessibilityService.isEnabled(context)
-        onPauseOrDispose { }
-    }
-    val openSettings = { context.startActivity(PwdeAccessibilityService.settingsIntent()) }
-    VoiceCommandsEffect(TURN_ON_COMMANDS) { openSettings() }
-
-    SwitchRow(
-        title = "Use PWDe",
-        description = if (enabled) "On — you're all set" else "Off — opens Android Settings to turn it on",
-        checked = enabled,
-        onCheckedChange = { openSettings() },
-        icon = Icons.Outlined.Settings,
-    )
-    if (enabled) {
-        StatusPill("PWDe is on", color = colors.success, icon = Icons.Outlined.Check)
-        return
-    }
-    SectionTitle("How to turn it on")
-    GradientCard(Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(
-                "Tap \"Open settings\" below.",
-                "Find PWDe under Installed apps (or Downloaded apps).",
-                "Turn on \"Use PWDe\", then tap Allow.",
-                "Come back here — this screen updates by itself.",
-            ).forEachIndexed { i, line ->
-                Text("${i + 1}. $line", style = MaterialTheme.typography.bodyLarge, color = colors.text)
-            }
-        }
-    }
-    PwdeButton("Open settings", openSettings, icon = Icons.Outlined.Settings, modifier = Modifier.fillMaxWidth())
-    InfoNote("If Android says the setting is restricted, open PWDe's app info, tap ⋮ and choose \"Allow restricted settings\".")
-}
 
 private fun axisSays(axis: Axis) = when (axis) {
     Axis.UP -> "Look up to move the pointer onto the top target. Change the speed until it feels comfortable."
@@ -503,14 +483,24 @@ private fun CursorCalibrationStep(state: SetupUiState, viewModel: SetupViewModel
             "recenter" -> viewModel.recenterCursor()
         }
     }
+    // Boot the camera for this step. Collecting [SetupViewModel.faceState] below is what turns
+    // tracking on, and refreshPreview() restarts it in case the session began before the camera was
+    // allowed (the accessibility service subscribes from the moment "Use PWDe" is switched on).
+    LifecycleResumeEffect(Unit) {
+        viewModel.refreshPreview()
+        onPauseOrDispose { }
+    }
     InfoNote(axisSays(axis))
     DemoModeBanner(face)
+    // While this step is open the live pointer is held inside the calibration box, and released
+    // again the moment the step is left.
+    val confine = rememberCalibrationOverlay(CalibrationOverlayMode.CONFINE_TO_BOX)
     CameraFeed(
         faceState = face,
         surfaceRequest = surface,
         canRequestCamera = viewModel.canRequestCamera,
         onCameraPermissionResult = viewModel::onCameraPermissionResult,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().then(confine),
         feedAspectRatio = 16f / 10f,
         overlay = { CursorCalibrationOverlay(face.cursor.x, face.cursor.y, face.hasFace, axis) },
     )
@@ -522,6 +512,12 @@ private fun CursorCalibrationStep(state: SetupUiState, viewModel: SetupViewModel
         modifier = Modifier.fillMaxWidth(),
     )
     LevelSlider(if (axis == Axis.DIAGONAL) "Smoothing" else "Speed moving ${axis.label.lowercase()}", level, ::set)
+    InfoNote(
+        "Smiling is already set up as your Select gesture and opening your mouth as Recenter, so " +
+            "you can press what the pointer is on and bring it back to the middle. Change either " +
+            "any time in Controls, then Gestures.",
+        icon = Icons.Outlined.CheckCircle,
+    )
 }
 
 /** Where the target sits for each direction. */

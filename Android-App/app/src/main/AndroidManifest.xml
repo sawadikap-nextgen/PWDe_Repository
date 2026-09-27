@@ -11,8 +11,6 @@
     <uses-feature android:name="android.hardware.camera.front" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-
     <!-- The live session runs in a foreground service so the camera and mic keep working while the
          game is on screen. Android 14+ also wants one permission per foreground-service type, and
          the type has to be declared on the service itself as well. -->

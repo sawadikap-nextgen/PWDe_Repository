@@ -9,6 +9,7 @@ import com.pwde.app.data.local.ControlsRepository
 import com.pwde.app.data.local.PwdeDatabase
 import com.pwde.app.data.model.CursorTuning
 import com.pwde.app.data.model.FacialGesture
+import com.pwde.app.data.model.GestureAction
 import com.pwde.app.data.prefs.AccessibilityNeed
 import com.pwde.app.data.prefs.ColorSchemeOption
 import com.pwde.app.data.prefs.LayoutMode
@@ -69,21 +70,46 @@ class SetupViewModelTest {
         SetupViewModel(settings, controls, appearanceOnly, FakeFaceTracking())
 
     private fun SetupViewModel.goTo(step: SetupStep) {
-        while (state.value.step != step) skipStep()
+        while (state.value.step != step) {
+            // The permissions step refuses to be skipped while camera and mic are off.
+            if (state.value.permissionBlocked) setPermissions(cameraGranted = true, micGranted = true)
+            skipStep()
+        }
     }
 
     @Test
-    fun steps_runInOrder() {
+    fun steps_runInOrder_cameraPermissionsFirst() {
         assertEquals(
             listOf(
-                SetupStep.TURN_ON,
-                SetupStep.NEEDS,
                 SetupStep.PERMISSIONS,
-                SetupStep.APPEARANCE,
                 SetupStep.CURSOR_CALIBRATION,
+                SetupStep.NEEDS,
+                SetupStep.APPEARANCE,
             ),
             viewModel().state.value.steps,
         )
+    }
+
+    @Test
+    fun permissionsStep_blocksContinueAndSkip_untilCameraAndMicAreOn() {
+        val vm = viewModel()
+        vm.goTo(SetupStep.PERMISSIONS)
+
+        assertTrue(vm.state.value.permissionBlocked)
+        vm.continueStep()
+        assertEquals(SetupStep.PERMISSIONS, vm.state.value.step)
+        vm.skipStep()
+        assertEquals(SetupStep.PERMISSIONS, vm.state.value.step)
+
+        vm.setPermissions(cameraGranted = true, micGranted = false)
+        assertTrue(vm.state.value.permissionBlocked)
+        vm.skipStep()
+        assertEquals(SetupStep.PERMISSIONS, vm.state.value.step)
+
+        vm.setPermissions(cameraGranted = true, micGranted = true)
+        assertFalse(vm.state.value.permissionBlocked)
+        vm.skipStep()
+        assertEquals(SetupStep.CURSOR_CALIBRATION, vm.state.value.step)
     }
 
     @Test
@@ -91,14 +117,19 @@ class SetupViewModelTest {
         val vm = viewModel()
 
         vm.continueStep()
+        assertEquals(SetupStep.PERMISSIONS, vm.state.value.step)
+
+        // The permissions step only lets the user through once both are allowed.
+        vm.setPermissions(cameraGranted = true, micGranted = true)
+        vm.continueStep()
+        assertEquals(SetupStep.CURSOR_CALIBRATION, vm.state.value.step)
+
+        repeat(Axis.entries.size) { vm.axisDone() }
         assertEquals(SetupStep.NEEDS, vm.state.value.step)
 
         vm.toggleNeed(AccessibilityNeed.MOVEMENT)
         vm.continueStep()
         assertEquals(setOf(AccessibilityNeed.MOVEMENT), settings.settings.value.accessibilityNeeds)
-        assertEquals(SetupStep.PERMISSIONS, vm.state.value.step)
-
-        vm.continueStep()
         assertEquals(SetupStep.APPEARANCE, vm.state.value.step)
 
         vm.setColorScheme(ColorSchemeOption.LIGHT)
@@ -110,10 +141,6 @@ class SetupViewModelTest {
             assertEquals(TextSizeOption.LARGE, textSize)
             assertEquals(LayoutMode.EASY_REACH, layoutMode)
         }
-        assertEquals(SetupStep.CURSOR_CALIBRATION, vm.state.value.step)
-        assertFalse(settings.settings.value.setupCompleted)
-
-        vm.continueStep()
         assertTrue(settings.settings.value.setupCompleted)
         assertTrue(vm.state.value.finished)
     }
@@ -128,7 +155,7 @@ class SetupViewModelTest {
 
         assertEquals(ColorSchemeOption.DEFAULT, settings.settings.value.colorScheme)
         assertEquals(ColorSchemeOption.DEFAULT, vm.state.value.colorScheme)
-        assertEquals(SetupStep.CURSOR_CALIBRATION, vm.state.value.step)
+        assertTrue(vm.state.value.finished)
     }
 
     @Test
@@ -147,10 +174,13 @@ class SetupViewModelTest {
     @Test
     fun back_onFirstStep_returnsFalse() {
         val vm = viewModel()
+        // Setup opens on permissions, which cannot be left forward while camera and mic are off.
         assertFalse(vm.back())
+        assertTrue(vm.state.value.permissionBlocked)
+        vm.setPermissions(cameraGranted = true, micGranted = true)
         vm.continueStep()
         assertTrue(vm.back())
-        assertEquals(SetupStep.TURN_ON, vm.state.value.step)
+        assertEquals(SetupStep.PERMISSIONS, vm.state.value.step)
     }
 
     @Test
@@ -165,8 +195,10 @@ class SetupViewModelTest {
         assertEquals(Axis.entries.first(), vm.state.value.axis)
         assertEquals(SetupStep.CURSOR_CALIBRATION, vm.state.value.step)
 
+        // The last axis ends the step, which hands over to "What you need".
         repeat(Axis.entries.size) { vm.axisDone() }
-        assertTrue(vm.state.value.finished)
+        assertEquals(SetupStep.NEEDS, vm.state.value.step)
+        assertFalse(vm.state.value.finished)
     }
 
     @Test
@@ -176,5 +208,16 @@ class SetupViewModelTest {
         vm.setCursor(tuning)
         assertEquals(tuning, vm.state.value.cursor)
         assertEquals(tuning, runBlocking { controls.config.first().cursor })
+    }
+
+    @Test
+    fun aFreshInstallAlreadyMapsSelectAndRecenter() = runBlocking {
+        assertEquals(
+            mapOf(
+                GestureAction.SELECT to FacialGesture.SMILE,
+                GestureAction.RECENTER to FacialGesture.OPEN_MOUTH,
+            ),
+            controls.config.first().gestureAssignments,
+        )
     }
 }
