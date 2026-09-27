@@ -547,7 +547,8 @@ private fun GestureTestStep(viewModel: GabAiViewModel, ui: GabAiUiState, test: G
             Text(
                 when {
                     passed -> "Detected! This gesture is on."
-                    face.isGyro -> "Face gestures need the camera, and a gyro joystick deliberately keeps it off — skip this one."
+                    face.isGyro && measure == null ->
+                        "With a gyro joystick, the phone's tilt steers: head tilt, nod and shake are off (skip those), and face expressions need your face in view."
                     face.isSimulated && measure == null -> "Demo mode can only simulate tilt, nod and shake — skip this one."
                     !face.hasFace -> "Face the camera to try it."
                     else -> "Do the move — the bar passes the white tick when PWDe sees it. Too hard? Raise the sensitivity."
