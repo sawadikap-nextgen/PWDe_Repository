@@ -80,8 +80,13 @@ class CursorOverlayView(context: Context) : View(context) {
         }
         canvas.drawCircle(cx, cy, 16f * density, shadow)
         fill.color = color
-        canvas.drawCircle(cx, cy, 12f * density, fill)
-        canvas.drawCircle(cx, cy, 12f * density, ring)
+        canvas.drawCircle(cx, cy, DOT_RADIUS_DP * density, fill)
+        canvas.drawCircle(cx, cy, DOT_RADIUS_DP * density, ring)
+    }
+
+    companion object {
+        /** The pointer dot's radius: what the calibration box has to inset by to hold it all. */
+        const val DOT_RADIUS_DP = 12f
     }
 }
 

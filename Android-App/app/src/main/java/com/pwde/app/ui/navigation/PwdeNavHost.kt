@@ -15,10 +15,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.pwde.app.PwdeApplication
 import com.pwde.app.data.model.Game
 import com.pwde.app.data.model.GestureAction
 import com.pwde.app.play.PlayService
 import com.pwde.app.ui.common.pwdeViewModel
+import com.pwde.app.ui.components.LocalCalibrationOverlay
 import com.pwde.app.ui.components.MainTab
 import com.pwde.app.ui.controls.ChooseGestureScreen
 import com.pwde.app.ui.controls.ChooseGestureViewModel
@@ -140,7 +142,10 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
         else navController.navigate(Routes.setup())
     }
 
-    CompositionLocalProvider(LocalVoiceController provides voice) {
+    CompositionLocalProvider(
+        LocalVoiceController provides voice,
+        LocalCalibrationOverlay provides (activity?.application as? PwdeApplication)?.container?.calibrationOverlay,
+    ) {
     NavHost(navController, startDestination = Routes.SPLASH) {
         // A · Account
         composable(Routes.SPLASH) {

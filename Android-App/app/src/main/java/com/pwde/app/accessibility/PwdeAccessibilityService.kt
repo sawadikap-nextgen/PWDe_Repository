@@ -23,6 +23,7 @@ import com.pwde.app.data.model.FaceOutputMode
 import com.pwde.app.data.model.FacialGesture
 import com.pwde.app.data.model.NavigationMode
 import com.pwde.app.data.prefs.ButtonOverlay
+import com.pwde.app.data.prefs.CalibrationOverlay
 import com.pwde.app.data.prefs.InputMode
 import com.pwde.app.data.model.TriggerType
 import com.pwde.app.play.GameCommand
@@ -100,6 +101,9 @@ class PwdeAccessibilityService : AccessibilityService() {
             }
             val overlayPrefs = (application as PwdeApplication).container.buttonOverlayPrefs
             s.launch { combine(livePlay.state, overlayPrefs.overlay, ::Pair).collect { (state, overlay) -> renderMarkers(state, overlay) } }
+            // Entering or leaving a calibration screen re-renders at once, rather than waiting for
+            // the next tracking frame, so the pointer is confined (or gone) the moment the box appears.
+            s.launch { container.calibrationOverlay.overlay.collect { render(livePlay.state.value, livePlay) } }
         }
     }
 
@@ -221,10 +225,27 @@ class PwdeAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** The pointer's dot, in display pixels, and the pad it is confined to while calibrating. */
     private fun renderCursor(face: FaceState, active: Boolean, dragging: Boolean, opacity: Float = 1f) {
+        val calibration = (application as PwdeApplication).container.calibrationOverlay.overlay.value
+        if (calibration is CalibrationOverlay.Hidden) {
+            removeView(cursorView)
+            cursorView = null
+            return
+        }
+        val box = (calibration as? CalibrationOverlay.Confine)?.box
         val view = cursorView ?: CursorOverlayView(this).takeIf { addOverlay(it, cursorParams()) }?.also { cursorView = it }
         val point = toScreen(face.cursor.x, face.cursor.y)
-        view?.update(point.x, point.y, active = active, dragging = dragging, opacity = opacity)
+        if (box == null) {
+            // Normal: the pointer roams the whole display.
+            view?.update(point.x, point.y, active = active, dragging = dragging, opacity = opacity)
+            return
+        }
+        // Calibrating: the whole dot stays inside the box the user is aiming at, so the pointer
+        // never wanders off to a corner of the screen the calibration is not talking about.
+        val inset = CursorOverlayView.DOT_RADIUS_DP * resources.displayMetrics.density
+        val (x, y) = PointerBounds.confine(point.x, point.y, box, inset)
+        view?.update(x, y, active = active, dragging = dragging, opacity = opacity)
     }
 
     /**
@@ -649,5 +670,25 @@ object ScreenMapping {
         val px = (x.coerceIn(0f, 1f) * width).coerceIn(0f, (width - 1).toFloat())
         val py = (y.coerceIn(0f, 1f) * height).coerceIn(0f, (height - 1).toFloat())
         return px to py
+    }
+}
+
+/**
+ * Keeps the drawn pointer inside a calibration box. Pure, so it's unit-tested.
+ *
+ * The dot has a radius, so clamping its *centre* to the box would still draw half the dot outside;
+ * [radiusPx] is subtracted on every edge. A box narrower than the dot (a very small feed in
+ * Easy-reach layout, or a stale box for one frame) falls back to that box's centre rather than
+ * inverting the range.
+ */
+object PointerBounds {
+    fun confine(x: Float, y: Float, box: CalibrationOverlay.Box, radiusPx: Float): Pair<Float, Float> {
+        val left = box.left + radiusPx
+        val right = box.right - radiusPx
+        val top = box.top + radiusPx
+        val bottom = box.bottom - radiusPx
+        val cx = if (left <= right) x.coerceIn(left, right) else box.left + box.width / 2f
+        val cy = if (top <= bottom) y.coerceIn(top, bottom) else box.top + box.height / 2f
+        return cx to cy
     }
 }

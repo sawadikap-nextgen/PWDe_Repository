@@ -18,6 +18,7 @@ import com.pwde.app.data.remote.NoOpSyncRepository
 import com.pwde.app.data.remote.SyncRepository
 import com.pwde.app.data.speech.SpeechOutput
 import com.pwde.app.data.prefs.ButtonOverlayPrefs
+import com.pwde.app.data.prefs.CalibrationOverlayState
 import com.pwde.app.play.LivePlay
 import com.pwde.app.sensors.face.FaceTrackingManager
 import com.pwde.app.sensors.face.MediaPipeFaceTrackingManager
@@ -100,6 +101,12 @@ class AppContainer(private val context: Context) {
 
     /** Whether the live session draws the mapped buttons over the game (a debugging aid), and how strongly. */
     val buttonOverlayPrefs by lazy { ButtonOverlayPrefs(context) }
+
+    /**
+     * What the open calibration screen wants of the live pointer overlay, if anything: confined to
+     * its box, or hidden entirely. Read synchronously by [com.pwde.app.accessibility.PwdeAccessibilityService].
+     */
+    val calibrationOverlay by lazy { CalibrationOverlayState() }
 
     fun newTutorialPlayer() = TutorialPlayer(context)
 
