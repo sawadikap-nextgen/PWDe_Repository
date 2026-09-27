@@ -497,7 +497,8 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
             id.startsWith("button:") -> viewModel.openTriggerChooser(id.removePrefix("button:").toInt())
             id.startsWith("type:") -> if (selected != null) type = TriggerType.valueOf(id.removePrefix("type:"))
             id.startsWith("gesture:") -> selected?.let { viewModel.pickGesture(it.id, FacialGesture.valueOf(id.removePrefix("gesture:"))) }
-            id.startsWith("dir:") -> selected?.let {
+            // "Stick up" on the movement joystick would turn it into a plain button press.
+            id.startsWith("dir:") -> selected?.takeIf { it.trigger?.type != TriggerType.MOVEMENT }?.let {
                 type = TriggerType.JOYSTICK
                 viewModel.setTrigger(it.id, ButtonTrigger(TriggerType.JOYSTICK, id.removePrefix("dir:")))
             }
@@ -600,10 +601,9 @@ private fun TriggerChooser(
     val conflicts = trigger?.let { value -> buttons.filter { it.id != button.id && it.trigger == value }.map { it.label } }.orEmpty()
     val gestureOff = trigger?.gesture?.let { it !in gestures } == true
 
-    // Filter out JOYSTICK and MOVEMENT
-    val availableTriggerTypes = TriggerType.entries.filter {
-        it != TriggerType.JOYSTICK && it != TriggerType.MOVEMENT
-    }
+    // Joystick directions are hidden; the movement joystick stays, so a detected stick shows as one
+    // (and a hand-placed stick, as in manual mapping, can still be made one).
+    val availableTriggerTypes = TriggerType.entries.filter { it != TriggerType.JOYSTICK }
     GradientCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -677,6 +677,22 @@ private fun TriggerChooser(
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
+                    }
+                }
+                TriggerType.MOVEMENT -> {
+                    if (trigger?.type == TriggerType.MOVEMENT) {
+                        Text(
+                            text = "This is the movement joystick: PWDe holds it and your head steers it.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textMuted
+                        )
+                    } else {
+                        SideButton(
+                            "Use as movement joystick",
+                            { viewModel.setTrigger(button.id, ButtonTrigger.MOVEMENT) },
+                            style = ButtonStyle.SECONDARY,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
 
