@@ -32,7 +32,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** Navigation the app-wide voice commands ask for. The NavHost performs it. */
-enum class VoiceNavigation { BACK, HOME, SETTINGS, GAMES, GABAI, PROFILE }
+enum class VoiceNavigation { BACK, HOME, SETTINGS, GAMES, GABAI, PROFILE, READ_SCREEN }
 
 /** What screens and the voice bar need from the voice system, without touching SpeechRecognizer. */
 interface VoiceController {
@@ -123,6 +123,7 @@ class VoiceViewModel(
             StandardCommands.GAMES.id -> _navigation.send(VoiceNavigation.GAMES)
             StandardCommands.GABAI.id -> _navigation.send(VoiceNavigation.GABAI)
             StandardCommands.PROFILE.id -> _navigation.send(VoiceNavigation.PROFILE)
+            StandardCommands.READ_SCREEN.id -> _navigation.send(VoiceNavigation.READ_SCREEN)
             else -> StandardCommands.gameToPlay(command)?.let { _playRequests.send(it) } ?: when (StandardCommands.shortcutOf(command)) {
                 VoiceShortcut.CURSOR_MODE -> switchInput(InputMode.HEAD_FACE, "Switched to cursor mode")
                 VoiceShortcut.JOYSTICK_MODE -> switchInput(InputMode.JOYSTICK, "Switched to joystick mode")

@@ -14,7 +14,6 @@ import com.pwde.app.data.gabai.GabAiRepository
 import com.pwde.app.data.gabai.GabAiSession
 import com.pwde.app.data.gabai.GabAiState
 import com.pwde.app.data.gabai.JoystickParameter
-import com.pwde.app.data.gabai.SuggestedPhrases
 import com.pwde.app.data.gabai.HudDetector
 import com.pwde.app.data.gabai.detectedToButtons
 import com.pwde.app.data.local.CalibrationProfile
@@ -28,12 +27,12 @@ import com.pwde.app.data.model.CursorTuning
 import com.pwde.app.data.model.FaceOutputMode
 import com.pwde.app.data.model.FacialGesture
 import com.pwde.app.data.model.Game
-import com.pwde.app.data.model.isEnabledBy
 import com.pwde.app.data.model.JoystickTuning
 import com.pwde.app.data.model.MappedButton
 import com.pwde.app.data.model.TriggerType
 import com.pwde.app.data.model.VoiceActivationMode
 import com.pwde.app.data.model.VoiceMatchMode
+import com.pwde.app.data.gabai.SuggestedPhrases
 import com.pwde.app.data.prefs.InputMode
 import com.pwde.app.data.prefs.SettingsRepository
 import com.pwde.app.play.GameInput

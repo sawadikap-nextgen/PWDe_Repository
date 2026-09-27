@@ -6,7 +6,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -84,7 +89,61 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
     voice.state.collectAsStateWithLifecycle()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    LaunchedEffect(currentRoute) { screenReader.onScreenShown(Routes.spokenTitle(currentRoute)) }
+    val screenTitle = Routes.spokenTitle(currentRoute)
+    // The whole app's semantics live in this one view, and only the visible destination is composed,
+    // so walking it reads exactly the screen the user is on.
+    val screenView = LocalView.current
+
+    // Read-aloud is off by default, and walking the screen's semantics is pure waste when it is off.
+    val readAloud by screenReader.enabled.collectAsStateWithLifecycle()
+    // The opening words of the previous screen's read: the marker that says it is still on screen.
+    val previousMarker = remember { mutableStateOf<List<ScreenEntry>>(emptyList()) }
+
+    /*
+     * Swapping screens is NOT a queue. Two things happen, and neither is a fixed delay:
+     *
+     * 1. Whatever the previous screen was reading is **dismissed at once**, so the two readings can
+     *    never overlap. It used to keep playing until the new read arrived and flushed it, which is
+     *    what felt like queueing — `QUEUE_FLUSH` only takes effect when the *next* utterance starts.
+     * 2. The new screen is read as soon as it is the only one in the tree. Navigation keeps the
+     *    outgoing destination composed for its whole transition, so reading sooner would read BOTH
+     *    screens. The marker for "it has gone" is the previous read's own opening words; the timeout is
+     *    only a safety net (Navigation's default transition is a 700ms fade), and with animations off
+     *    the loop exits on the next frame.
+     *
+     * Re-keying on the route cancels a pending read when the user moves straight on, so a screen the
+     * user has already left is never spoken.
+     */
+    LaunchedEffect(currentRoute, readAloud, screenReader, screenView) {
+        screenReader.stopReading()
+        if (!readAloud) return@LaunchedEffect
+        withFrameNanos { }
+
+        val leaving = previousMarker.value
+        var entries = AndroidScreenText.of(screenView)
+        var frame = withFrameNanos { it }
+        val deadline = frame + SETTLE_TIMEOUT_NANOS
+        while (frame < deadline && (entries.isEmpty() || overlapsOutgoing(leaving, entries))) {
+            frame = withFrameNanos { it }
+            entries = AndroidScreenText.of(screenView)
+        }
+        // Only the marker is kept, never the whole read: a loop that hit the timeout holds a *blended*
+        // tree, and keeping all of it would make the next screen's marker vaguer — and wait out the
+        // timeout again, every time.
+        previousMarker.value = entries.take(MARKER_ENTRIES)
+        screenReader.onScreenShown(screenTitle, entries)
+    }
+
+    // "read screen" re-reads on demand, immediately, for the screen the user is looking at. The
+    // rememberUpdatedState holders keep the *current* route's title and setting, because the voice
+    // collector below captures this lambda once and must not re-read a screen the user has left.
+    val latestTitle = rememberUpdatedState(screenTitle)
+    val latestReadAloud = rememberUpdatedState(readAloud)
+    val readCurrentScreen: () -> Unit = {
+        if (latestReadAloud.value) {
+            screenReader.onScreenShown(latestTitle.value, AndroidScreenText.of(screenView))
+        }
+    }
 
     fun inMainApp() = runCatching { navController.getBackStackEntry(Routes.DASHBOARD) }.isSuccess
 
@@ -126,6 +185,7 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
                 VoiceNavigation.GAMES -> if (inMainApp()) openTab(MainTab.GAMES)
                 VoiceNavigation.GABAI -> if (inMainApp() && navController.currentDestination?.route != Routes.GABAI) openTab(MainTab.GABAI)
                 VoiceNavigation.PROFILE -> if (inMainApp()) openTab(MainTab.PROFILE)
+                VoiceNavigation.READ_SCREEN -> readCurrentScreen()
             }
         }
     }
@@ -340,7 +400,7 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
             JoystickScreen(pwdeViewModel { JoystickViewModel(it.controlsRepository, it.settingsRepository, it.faceTrackingManager) }, onBack = ::back)
         }
         composable(Routes.VOICE_CONFIG) {
-            VoiceConfigScreen(pwdeViewModel { VoiceConfigViewModel(it.controlsRepository, it.voiceCommandManager) }, onBack = ::back)
+            VoiceConfigScreen(pwdeViewModel { VoiceConfigViewModel(it.controlsRepository, it.voiceCommandManager, it.settingsRepository) }, onBack = ::back)
         }
 
         // F · Testing Station (debug builds only — see debug/ and release/ source sets), tutorial video
@@ -425,3 +485,18 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
     }
     }
 }
+
+/**
+ * How long to keep waiting for the outgoing screen's text to leave the semantics tree before reading
+ * whatever is there. Only a safety net — the loop normally exits as soon as the transition ends, and
+ * immediately when animations are off. Navigation's default transition is a 700ms fade, so this sits
+ * just above it.
+ */
+private const val SETTLE_TIMEOUT_NANOS = 900L * 1_000_000
+
+/** How many of the previous read's opening words mark it as still on screen. Two is enough to be specific. */
+private const val MARKER_ENTRIES = 2
+
+/** True while any of the outgoing screen's opening words are still in the tree. */
+internal fun overlapsOutgoing(leaving: List<ScreenEntry>, entries: List<ScreenEntry>): Boolean =
+    leaving.any { old -> entries.any { it.text == old.text } }
