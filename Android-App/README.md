@@ -72,7 +72,7 @@ Signing in only adds (future) cloud sync. It never gates features and never dele
 - Every `PwdeScreen` shows the same floating mic (`VoiceMicOverlay`). Tap it to turn voice on or off. Nothing is shown while idle; what PWDe heard and the command it matched pop up beside the mic for a few seconds and are announced to screen readers. A screen's `voiceHint` is read out with the mic button.
 
 **Fallbacks (never a crash, never a block).**
-- No camera permission or no front camera: the phone's motion sensors stand in for your head. Every place this is active shows **"Demo Mode: Simulated Head Tracking"**.
+- No camera permission or no front camera: the phone's motion sensors stand in for your head. Every place this is active shows **"Demo Mode: Simulated Head Tracking"**. Setup asks for the camera before anything boots so this fallback doesn't surprise a new user mid-calibration; a session that already fell back is restarted by `SetupViewModel.refreshPreview()` when the calibration step resumes.
 - No mic permission: tapping the floating mic asks for it. No recognition service: the mic shows as off and every screen still works by touch. There is no typed-command box on app screens (`VoiceCommandManager.submitText` remains as an API with no UI caller); gameplay keeps its own typed fallback.
 
 **In-game voice (button activations).** During gameplay only, voice goes through the `InGameVoiceEngine` interface. It recognizes just the active game profile's button triggers plus back/pause/menu, resume, select, recenter and "show controls" (labels every mapped button with what presses it for a few seconds). This covers both the in-app playing view and PWDe running over the real game.
@@ -118,7 +118,7 @@ The back arrow, the system back gesture and voice "back" always do the same thin
 - [ ] Game Detail → Edit profile (GabAI, placing buttons) → Done → back → placing buttons → back → Game Detail
 - [ ] Dashboard → GabAI → start calibration → back → GabAI Welcome → back → Dashboard
 - [ ] GabAI game profile → save → Play → back → the screen GabAI was opened from
-- [ ] Setup step 3 → back → step 2 → back → step 1 → back → Welcome; Voice tutorial likewise
+- [ ] Setup: permissions step asks for the camera first, then the microphone; back exits to Welcome (camera + mic are required, so Skip is hidden until both are on); cursor calibration → back → permissions → back → Welcome; Voice tutorial likewise
 - [ ] Profile → Edit appearance → back → Profile
 - [ ] On Dashboard, saying "back" does nothing (the app stays open)
 
@@ -127,12 +127,11 @@ The back arrow, the system back gesture and voice "back" always do the same thin
 | Area | Status |
 |---|---|
 | Splash, Welcome, Sign in / Create account / Reset password | Real (sign-in needs Firebase config) |
-| Setup: needs, appearance (live preview), input mode | Real, saved to DataStore on Continue. The "Try it now" pointer is live head tracking |
+| Setup: permissions (camera → mic → accessibility service), cursor calibration, needs, appearance | Real. Permissions come first on one screen and the camera is asked for before the microphone, so the pointer is head-tracked rather than gyro-driven when calibration boots it. Camera + mic are required; needs and appearance save to DataStore on Continue |
 | Voice tutorial, including TTS read-aloud and speed | Real (Android TextToSpeech), voice-controllable |
 | Input mode (Controls) | Real; switches the tracking output (pointer / joystick) live |
 | Gestures + per-gesture sensitivity | Real: 25 gestures plus all 52 MediaPipe blendshapes, saved to Room, live "try it" meter |
-| Cursor speed, joystick | Real: live camera, live pointer/joystick; settings saved to Room |
-| Voice configuration | Real: live mic level, on/off, matching and activation modes, command list |
+| Cursor speed, joystick | Real: live camera, live pointer/joystick; settings saved to Room || Voice configuration | Real: live mic level, on/off, matching and activation modes, command list |
 | Testing Station (debug builds only) | Real: live face, gesture, voice, cursor and joystick readouts, plus a sherpa-onnx wake word panel whose tuning gameplay shares |
 | Watch Tutorial | Real player with a placeholder video (`res/raw/tutorial_placeholder.mp4`) |
 | GabAI | Real: calibration and game-profile flows, resumable after a force-close |
@@ -140,9 +139,41 @@ The back arrow, the system back gesture and voice "back" always do the same thin
 | Playing view | Live overlay over your game screenshot (or a simulated arena). Mapped buttons are pressed by voice (sherpa-onnx keyword spotting), gesture or joystick |
 | Profile | Real: profile lists with rename/delete, "Use now" for calibrations, Play/Edit for game profiles, sync status |
 
+## Default controls
+
+A fresh install already maps two gestures, so the pointer is usable before the user has mapped
+anything:
+
+| Gesture | Action | Why |
+|---|---|---|
+| **Smile** | Select | Easiest curated gesture to make on purpose and to stop again; `mouthSmile` left/right averaged |
+| **Open mouth** | Recenter | Distinct from a smile and from speech; a single `jawOpen` score |
+
+Both read cleanly from the front camera and are unmistakable in a live preview. Setup (cursor
+calibration) and GabAI both say so out loud, and every mapping stays editable in **Controls →
+Gestures**. `ControlConfig.gestureAssignments` defaults to this map, so a profile with no saved
+assignments — an upgraded install included — picks it up.
+
+## The pointer during calibration
+
+When the accessibility service is on, the live pointer is drawn by a window that covers the whole
+display, so it also lands on top of PWDe's own screens. A calibration screen therefore tells the
+overlay what it wants via `CalibrationOverlayState` (published from Compose with
+`rememberCalibrationOverlay`, read synchronously by `PwdeAccessibilityService`):
+
+- **Cursor calibration** (Setup's step, Controls → Cursor speed, GabAI's axis walkthrough) confines the
+  pointer to the calibration box — the camera feed the pointer is drawn over — so it never wanders to a
+  corner of the screen the calibration isn't talking about. The whole dot is held inside, inset by its
+  radius (`PointerBounds.confine`).
+- **Joystick tuning** (Controls → Joystick, GabAI's joystick steps) hides the pointer entirely: a
+  joystick is steered by tilting, so a roaming pointer is just noise.
+
+Both revert to normal the moment the screen is left or PWDe is paused, so nothing is confined or
+hidden while the user is away playing.
+
 ## Known limitations
 
-- **No real game control.** PWDe doesn't launch or press buttons in Clash Royale or Mobile Legends. There's no accessibility service, by design. The playing view shows which mapped button would be pressed, over your screenshot.
+- **No real game control.** PWDe doesn't launch Clash Royale or Mobile Legends, and it can't press the phone's own hardware or system UI. The accessibility service (`PwdeAccessibilityService`, "Use PWDe") taps, scrolls and drags at the pointer over whatever app is on screen — it never reads what is on screen — but the playing view's own buttons are still mapped by hand.
 - **Buttons are placed by hand.** GabAI's button mapping is manual (tap, drag, or "place" at the head pointer). There's no ML button detection in this build.
 - **In-game keyword spotting is arm64-only.** On other ABIs gameplay falls back to Android `SpeechRecognizer`, where latency and restart beeps depend on the phone's speech service. Spotter tuning is not saved across app restarts.
 - **Cloud sync is a stub.** Signing in never blocks or deletes anything, but profiles only live on this phone for now.
@@ -150,4 +181,4 @@ The back arrow, the system back gesture and voice "back" always do the same thin
 - **Tracking speed.** Face tracking runs on the CPU at roughly 15–30 fps depending on the phone.
 - **Release signing.** No release signing config is set up. `assembleRelease` produces an unsigned APK to sign with your own key.
 
-Gesture actions like Notifications, All apps and Touch & hold act inside PWDe's overlay only. PWDe has no accessibility service or system-level control.
+Gesture actions like Notifications, All apps and Touch & hold act inside PWDe's overlay only. System-level actions (Back, Home, Recents, Notifications, All apps) go through the accessibility service, so they do nothing until "Use PWDe" is switched on in Android Settings.
