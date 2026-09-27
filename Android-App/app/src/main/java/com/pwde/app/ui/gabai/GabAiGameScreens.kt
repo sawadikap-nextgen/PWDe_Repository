@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.WarningAmber
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -180,7 +181,7 @@ internal fun ScreenshotStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         when (id) {
             "pick" -> pick()
             "blank" -> viewModel.useBlankScreen()
-            "next" -> if (hasShot) viewModel.screenshotDone()
+            "next" -> if (hasShot && !ui.detectingButtons) viewModel.screenshotDone()
         }
     }
     GabAiStep(
@@ -190,21 +191,38 @@ internal fun ScreenshotStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
         says = "Show me the game: pick a screenshot of it mid-match, with its buttons visible. We'll mark the buttons on it next.",
         voiceHint = "Say \"choose screenshot\", \"blank screen\" or \"next\"",
         footer = {
-            PwdeButton("Next", viewModel::screenshotDone, enabled = hasShot, icon = Icons.AutoMirrored.Outlined.ArrowForward, modifier = Modifier.fillMaxWidth())
+            PwdeButton("Next", viewModel::screenshotDone, enabled = hasShot && !ui.detectingButtons, icon = Icons.AutoMirrored.Outlined.ArrowForward, modifier = Modifier.fillMaxWidth())
         },
     ) {
         val shot = ui.screenshot
         if (shot != null) {
-            Image(
-                shot,
-                contentDescription = "Your game screenshot",
-                modifier = Modifier.fillMaxWidth().clip(PwdeShapes.card).border(2.dp, PwdeTheme.colors.borderBrush, PwdeShapes.card),
-                contentScale = ContentScale.FillWidth,
-            )
+            Box(Modifier.fillMaxWidth().clip(PwdeShapes.card).border(2.dp, PwdeTheme.colors.borderBrush, PwdeShapes.card)) {
+                Image(
+                    shot,
+                    contentDescription = "Your game screenshot",
+                    modifier = Modifier.fillMaxWidth(),
+                    contentScale = ContentScale.FillWidth,
+                )
+                if (ui.detectingButtons) {
+                    Column(
+                        Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.6f))
+                            .semantics { contentDescription = "Processing your screenshot" },
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        CircularProgressIndicator(color = Color.White)
+                        Text(
+                            "Finding the buttons…",
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                }
+            }
         }
         PwdeButton(if (shot == null) "Choose screenshot" else "Choose a different one", pick, icon = Icons.Outlined.Image, modifier = Modifier.fillMaxWidth())
         PwdeButton("Use a blank screen instead", viewModel::useBlankScreen, style = ButtonStyle.SECONDARY, modifier = Modifier.fillMaxWidth())
-        if (ui.detectingButtons) InfoNote("Finding the buttons on your screenshot…")
         val privacy = if (viewModel.autoDetectsButtons) "It's sent to PWDe's server once to find the buttons, then kept on this phone." else "It stays on this phone."
         InfoNote("Take the screenshot in the game first. $privacy Without one, you'll place buttons on a blank screen.")
     }

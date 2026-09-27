@@ -278,6 +278,7 @@ class GameplayViewModel(
             GameCommand.JoystickMode -> post("Joystick mode (in the real game only)", OverlayEvent.Kind.ACTION)
             GameCommand.GyroMode -> post("Gyro joystick (in the real game only)", OverlayEvent.Kind.ACTION)
             GameCommand.HeadTracking -> post("Head joystick (in the real game only)", OverlayEvent.Kind.ACTION)
+            is GameCommand.SwitchProfile -> post("Switching profiles works in the real game only", OverlayEvent.Kind.ACTION)
             GameCommand.GameMode -> setNavigationMode(NavigationMode.GAME)
             GameCommand.NavigationMode -> setNavigationMode(NavigationMode.NAVIGATION)
             is GameCommand.Ignored -> post(command.reason, OverlayEvent.Kind.IGNORED)

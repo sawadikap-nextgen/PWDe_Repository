@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.pwde.app.data.model.ButtonTrigger
 import com.pwde.app.data.model.MappedButton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -35,8 +36,23 @@ class CloudHudDetector(baseUrl: String) : HudDetector {
 
     override val isAvailable = true
 
-    override suspend fun detect(screenshotPath: String, gameId: String): List<DetectedButton> = withContext(Dispatchers.IO) {
-        val backendGame = BACKEND_GAMES[gameId] ?: return@withContext emptyList()
+    override suspend fun detect(screenshotPath: String, gameId: String): List<DetectedButton> {
+        val backendGame = BACKEND_GAMES[gameId] ?: return emptyList()
+        // Retry network errors and server-side failures (cold starts, 429/5xx) with backoff;
+        // a 4xx rejection of the image won't change on retry, so it fails straight away.
+        var attempt = 1
+        while (true) {
+            try {
+                return detectOnce(screenshotPath, backendGame)
+            } catch (e: IOException) {
+                if (e is RejectedException || attempt >= MAX_ATTEMPTS) throw e
+                delay(RETRY_DELAY_MS * (1L shl (attempt - 1)))
+                attempt++
+            }
+        }
+    }
+
+    private suspend fun detectOnce(screenshotPath: String, backendGame: String): List<DetectedButton> = withContext(Dispatchers.IO) {
         val boundary = "pwde-${UUID.randomUUID()}"
         val connection = URL("$baseUrl/detect?game=$backendGame").openConnection() as HttpURLConnection
         try {
@@ -52,6 +68,7 @@ class CloudHudDetector(baseUrl: String) : HudDetector {
                 out.write("\r\n--$boundary--\r\n".toByteArray())
             }
             val code = connection.responseCode
+            if (code in 400..499 && code != 408 && code != 429) throw RejectedException(code)
             if (code !in 200..299) throw IOException("Detection failed: HTTP $code")
             val response = connection.inputStream.bufferedReader().use { gson.fromJson(it, DetectResponse::class.java) }
             response.toButtons()
@@ -72,7 +89,13 @@ class CloudHudDetector(baseUrl: String) : HudDetector {
         }
     }
 
+    /** The backend refused the request itself; retrying won't help. */
+    private class RejectedException(code: Int) : IOException("Detection rejected: HTTP $code")
+
     private companion object {
+        const val MAX_ATTEMPTS = 3
+        const val RETRY_DELAY_MS = 1_000L
+
         /** App game id → the backend's `game` query value (calibration-backend/app/constants.py GAMES). */
         val BACKEND_GAMES = mapOf("mobile_legends" to "mlbb", "clash_royale" to "clash_royale")
     }
