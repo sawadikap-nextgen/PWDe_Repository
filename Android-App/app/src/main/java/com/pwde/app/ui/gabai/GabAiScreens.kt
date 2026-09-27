@@ -54,6 +54,7 @@ import com.pwde.app.data.model.VoiceMatchMode
 import com.pwde.app.sensors.face.GestureThresholds
 import com.pwde.app.ui.components.ButtonStyle
 import com.pwde.app.ui.components.CameraFeed
+import com.pwde.app.ui.components.CalibrationOverlayMode
 import com.pwde.app.ui.components.CursorCalibrationOverlay
 import com.pwde.app.ui.components.DemoModeBanner
 import com.pwde.app.ui.components.GestureMeter
@@ -79,6 +80,7 @@ import com.pwde.app.ui.components.SwitchRow
 import com.pwde.app.ui.components.VoiceCommandsEffect
 import com.pwde.app.ui.components.fmt
 import com.pwde.app.ui.components.levelWord
+import com.pwde.app.ui.components.rememberCalibrationOverlay
 import com.pwde.app.ui.components.voiceCommand
 import com.pwde.app.ui.theme.PwdeShapes
 import com.pwde.app.ui.theme.PwdeTheme
@@ -306,12 +308,14 @@ private fun CursorAxisStep(viewModel: GabAiViewModel, ui: GabAiUiState, axis: Ax
     ) {
         StepProgress(axis.ordinal + 1, Axis.entries.size, "${axis.label} direction")
         DemoModeBanner(face)
+        // The live pointer is held inside the calibration box for as long as this step is open.
+        val confine = rememberCalibrationOverlay(CalibrationOverlayMode.CONFINE_TO_BOX)
         CameraFeed(
             faceState = face,
             surfaceRequest = surface,
             canRequestCamera = viewModel.canRequestCamera,
             onCameraPermissionResult = viewModel::onCameraPermissionResult,
-            modifier = Modifier.align(Alignment.CenterHorizontally).fillMaxWidth(),
+            modifier = Modifier.align(Alignment.CenterHorizontally).fillMaxWidth().then(confine),
             feedAspectRatio = 16f / 10f,
             overlay = {
                 CursorCalibrationOverlay(face.cursor.x, face.cursor.y, face.hasFace, targetFor(axis))
@@ -395,6 +399,9 @@ private fun JoystickStep(viewModel: GabAiViewModel, ui: GabAiUiState, parameter:
     ) {
         StepProgress(parameter.ordinal + 1, JoystickParameter.entries.size, parameter.label)
         DemoModeBanner(face)
+        // A joystick is steered by tilting, so the roaming pointer is just noise here: it is hidden
+        // for as long as this step is open, and comes back when the step is left.
+        rememberCalibrationOverlay(CalibrationOverlayMode.HIDE_POINTER)
         CameraFeed(
             faceState = face,
             surfaceRequest = surface,

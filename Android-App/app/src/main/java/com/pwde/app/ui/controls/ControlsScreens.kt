@@ -57,6 +57,7 @@ import com.pwde.app.sensors.voice.VoiceCommand
 import com.pwde.app.ui.components.ButtonStyle
 import com.pwde.app.ui.components.CheckBadge
 import com.pwde.app.ui.components.CameraFeed
+import com.pwde.app.ui.components.CalibrationOverlayMode
 import com.pwde.app.ui.components.CursorCalibrationOverlay
 import com.pwde.app.ui.components.DemoModeBanner
 import com.pwde.app.ui.components.GestureMeter
@@ -77,6 +78,7 @@ import com.pwde.app.ui.components.StatusPill
 import com.pwde.app.ui.components.VoiceCommandsEffect
 import com.pwde.app.ui.components.fmt
 import com.pwde.app.ui.components.levelWord
+import com.pwde.app.ui.components.rememberCalibrationOverlay
 import com.pwde.app.ui.components.voiceCommand
 import com.pwde.app.ui.dashboard.icon
 import com.pwde.app.ui.theme.PwdeShapes
@@ -480,12 +482,14 @@ fun CursorSpeedScreen(viewModel: CursorSpeedViewModel, onBack: () -> Unit) {
         voiceHint = "Say \"faster\", \"slower\", \"recenter\" or \"advanced\"",
     ) {
         DemoModeBanner(face)
+        // The live pointer is held inside the calibration box while this screen is open.
+        val confine = rememberCalibrationOverlay(CalibrationOverlayMode.CONFINE_TO_BOX)
         CameraFeed(
             faceState = face,
             surfaceRequest = surface,
             canRequestCamera = viewModel.canRequestCamera,
             onCameraPermissionResult = viewModel::onCameraPermissionResult,
-            modifier = Modifier.align(Alignment.CenterHorizontally).fillMaxWidth(),
+            modifier = Modifier.align(Alignment.CenterHorizontally).fillMaxWidth().then(confine),
             feedAspectRatio = 16f / 10f,
             overlay = {
                 CursorCalibrationOverlay(face.cursor.x, face.cursor.y, face.hasFace, Offset(0.5f, 0.5f))
@@ -555,6 +559,9 @@ fun JoystickScreen(viewModel: JoystickViewModel, onBack: () -> Unit) {
         voiceHint = "Say \"increase size\", \"increase sensitivity\" or \"set center\"",
     ) {
         DemoModeBanner(face)
+        // A joystick is steered by tilting, so the roaming pointer is just noise here: it is hidden
+        // for as long as this screen is open, and comes back when the user leaves.
+        rememberCalibrationOverlay(CalibrationOverlayMode.HIDE_POINTER)
         val sizeLevel = tuning?.size ?: 5
         val sizeFraction = 0.55f + 0.45f * (sizeLevel - MIN_LEVEL) / (MAX_LEVEL - MIN_LEVEL).toFloat()
         CameraFeed(
