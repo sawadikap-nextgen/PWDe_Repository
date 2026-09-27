@@ -93,7 +93,8 @@ import com.pwde.app.ui.components.SectionTitle
 import com.pwde.app.ui.components.SegmentedToggle
 import com.pwde.app.ui.components.StatusPill
 import com.pwde.app.ui.components.VoiceCommandsEffect
-import com.pwde.app.ui.games.GameCard
+import com.pwde.app.data.games.gameDisplayName
+import com.pwde.app.ui.games.GameGrid
 import com.pwde.app.ui.components.voiceCommand
 import com.pwde.app.data.local.inputModeOrDefault
 import com.pwde.app.ui.theme.PwdeShapes
@@ -106,14 +107,16 @@ import androidx.compose.foundation.layout.heightIn
 internal fun ChooseGameStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     val commands = remember { Game.entries.map { voiceCommand(it.id, it.displayName) } }
     val gameProfiles by viewModel.gameProfiles.collectAsStateWithLifecycle()
+    val customGames by viewModel.customGames.collectAsStateWithLifecycle()
     VoiceCommandsEffect(commands) { id -> Game.byId(id)?.let(viewModel::chooseGame) }
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Game profile",
         says = "Which game are we setting up?",
         voiceHint = "Say a game's name",
     ) {
-        Game.entries.forEach { game -> GameCard(game, hasProfile = gameProfiles.any { it.gameId == game.id }) { viewModel.chooseGame(game) } }
+        GameGrid(Game.entries, hasProfile = { game -> gameProfiles.any { it.gameId == game.id } }, onGame = viewModel::chooseGame, customGames = customGames, onAddedGame = viewModel::chooseCustomGame, onAddGame = viewModel::addCustomGame)
     }
 }
 
@@ -129,7 +132,8 @@ internal fun ConfirmCalibrationStep(viewModel: GabAiViewModel, ui: GabAiUiState)
     VoiceCommandsEffect(CONFIRM_COMMANDS) { id -> if (id == "use") viewModel.confirmCalibration() else viewModel.calibrateForThisGame() }
     GabAiStep(
         viewModel, ui,
-        title = "Calibration for ${Game.byId(ui.form.gameId)?.displayName ?: "this game"}",
+        panelTitle = ui.panelTitle,
+        title = "Calibration for ${gameDisplayName(ui.form.gameId) ?: "this game"}",
         says = if (profiles.isEmpty()) "This game needs a calibration profile first. Let's make one — it only takes a minute."
         else "Which calibration should this game use? Keep the one I picked, or switch.",
         voiceHint = if (profiles.isEmpty()) "Say \"new calibration\"" else "Say \"use this one\" or \"new calibration\"",
@@ -181,6 +185,7 @@ internal fun ScreenshotStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     }
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Game screenshot",
         says = "Show me the game: pick a screenshot of it mid-match, with its buttons visible. We'll mark the buttons on it next.",
         voiceHint = "Say \"choose screenshot\", \"blank screen\" or \"next\"",
@@ -248,6 +253,7 @@ internal fun ButtonMappingStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     }
     GabAiStageStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Mark the buttons",
         says = "Tap each game button, or point and say \"place\". Then name it.",
         voiceHint = "Say \"place\", \"rename\", \"move left\" or \"done\"",
@@ -515,6 +521,7 @@ internal fun AssignTriggersStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
 
     GabAiStageStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Choose how to press each button",
         says = if (selected != null) "How to press ${selected.label}?" else "Tap a button or say its name, then choose how to press it.",
         voiceHint = if (selected != null) "Say \"voice\", \"gesture\", \"joystick\", \"previous\", \"next\" or \"done mapping\""
@@ -773,6 +780,7 @@ internal fun TestControlsStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
 
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Test controls",
         says = "Try out your controls now! Perform a gesture or say a command to test your mappings.",
         voiceHint = "Say a command or tap Next",
@@ -810,12 +818,13 @@ internal fun TestControlsStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
 
 @Composable
 internal fun NameAndSaveStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
-    val game = Game.byId(ui.form.gameId)
+    val gameName = gameDisplayName(ui.form.gameId)
     VoiceCommandsEffect(remember { listOf(voiceCommand("save", "save", "save profile")) }) { viewModel.saveGameProfile() }
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Name and save",
-        says = "All set! Give this ${game?.displayName ?: "game"} profile a name, and I'll save it.",
+        says = "All set! Give this ${gameName ?: "game"} profile a name, and I'll save it.",
         voiceHint = "Say \"save\"",
         footer = { PwdeButton("Save game profile", viewModel::saveGameProfile, icon = Icons.Outlined.Save, modifier = Modifier.fillMaxWidth()) },
     ) {
@@ -847,11 +856,15 @@ internal fun ProfileSavedStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     }
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Profile saved",
         says = "Saved \"${ui.form.profileName}\"! You can edit it any time from your Profile.",
         voiceHint = "Say \"play now\", \"create another\" or \"dashboard\"",
     ) {
-        PwdeButton("Play now", viewModel::playNow, icon = Icons.Outlined.PlayArrow, modifier = Modifier.fillMaxWidth())
+        // An added game isn't supported yet: its mapping is saved, but there's nothing to launch.
+        if (Game.byId(ui.form.gameId) != null) {
+            PwdeButton("Play now", viewModel::playNow, icon = Icons.Outlined.PlayArrow, modifier = Modifier.fillMaxWidth())
+        }
         PwdeButton("Create another", { viewModel.createAnother() }, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.Add, modifier = Modifier.fillMaxWidth())
         PwdeButton("Go to Dashboard", viewModel::goToDashboard, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.Dashboard, modifier = Modifier.fillMaxWidth())
     }

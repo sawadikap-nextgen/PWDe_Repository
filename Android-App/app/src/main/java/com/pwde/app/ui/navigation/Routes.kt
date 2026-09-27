@@ -1,5 +1,7 @@
 package com.pwde.app.ui.navigation
 
+import android.net.Uri
+
 /** Every destination in the app. Order mirrors the Figma flow (A Account → H Profile). */
 object Routes {
     // A · Account
@@ -49,10 +51,11 @@ object Routes {
     const val GABAI = "gabai?start={start}&game={game}&edit={edit}"
     const val GABAI_START_WELCOME = "welcome"
     const val GABAI_START_GAME = "game"
+    const val GABAI_START_MANUAL = "manual"
 
     /** GabAI's Welcome, or straight into a new game profile (optionally for [gameId]), or editing one. */
-    fun gabai(newGameProfile: Boolean = false, gameId: String? = null, editProfileId: Long? = null) =
-        "gabai?start=${if (newGameProfile) GABAI_START_GAME else GABAI_START_WELCOME}&game=${gameId.orEmpty()}&edit=${editProfileId ?: -1}"
+    fun gabai(newGameProfile: Boolean = false, gameId: String? = null, editProfileId: Long? = null, manual: Boolean = false) =
+        "gabai?start=${if (manual) GABAI_START_MANUAL else if (newGameProfile) GABAI_START_GAME else GABAI_START_WELCOME}&game=${Uri.encode(gameId.orEmpty())}&edit=${editProfileId ?: -1}"
 
     // H · Profile
     const val PROFILE = "profile"

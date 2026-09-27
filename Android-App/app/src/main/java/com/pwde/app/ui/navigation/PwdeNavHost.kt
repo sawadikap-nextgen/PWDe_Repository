@@ -38,6 +38,7 @@ import com.pwde.app.ui.controls.JoystickViewModel
 import com.pwde.app.ui.dashboard.DashboardDestination
 import com.pwde.app.ui.dashboard.DashboardScreen
 import com.pwde.app.ui.dashboard.DashboardViewModel
+import com.pwde.app.data.games.CustomGameId
 import com.pwde.app.ui.gabai.GabAiScreen
 import com.pwde.app.ui.gabai.GabAiStart
 import com.pwde.app.ui.gabai.GabAiViewModel
@@ -245,8 +246,10 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
         }
         composable(Routes.GAMES) {
             GamesScreen(
-                viewModel = pwdeViewModel { GamesViewModel(it.profileRepository) },
+                viewModel = pwdeViewModel { GamesViewModel(it.profileRepository, it.customGamesRepository) },
                 onGame = { navController.navigate(Routes.gameDetail(it.id)) },
+                // Added games aren't supported, but their buttons can still be mapped by hand.
+                onMapAddedGame = { navController.navigate(Routes.gabai(manual = true, gameId = CustomGameId.of(it))) },
                 onTab = ::openTab,
             )
         }
@@ -302,6 +305,7 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
                         ControlsDestination.JOYSTICK -> Routes.CONTROLS_JOYSTICK
                         ControlsDestination.VOICE -> Routes.VOICE_CONFIG
                         ControlsDestination.CUSTOM_BUTTONS -> Routes.gabai(newGameProfile = true)
+                        ControlsDestination.MANUAL_BUTTONS -> Routes.gabai(manual = true)
                     },
                 )
             }
@@ -358,6 +362,7 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
             val editId = args?.getLong("edit")?.takeIf { it >= 0 }
             val start = when {
                 editId != null -> GabAiStart.EditGameProfile(editId)
+                args?.getString("start") == Routes.GABAI_START_MANUAL -> GabAiStart.ManualMapping(args.getString("game")?.ifEmpty { null })
                 args?.getString("start") == Routes.GABAI_START_GAME -> GabAiStart.NewGameProfile(args.getString("game")?.ifEmpty { null })
                 else -> GabAiStart.Welcome
             }
@@ -371,6 +376,7 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
                         buttonSpeechModel = it.inAppVoiceEngine.modelLabel,
                         inGameVoice = it.inAppVoiceEngine,
                         livePlay = it.livePlay,
+                        customGamesRepository = it.customGamesRepository,
                     )
                 },
                 onExit = ::back,

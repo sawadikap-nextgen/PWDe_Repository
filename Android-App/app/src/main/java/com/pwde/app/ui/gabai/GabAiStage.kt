@@ -72,6 +72,7 @@ internal fun GabAiStageStep(
     title: String,
     says: String,
     voiceHint: String,
+    panelTitle: String,
     footer: @Composable () -> Unit,
     stage: @Composable BoxScope.() -> Unit,
     content: @Composable ColumnScope.() -> Unit,
@@ -103,11 +104,11 @@ internal fun GabAiStageStep(
                 Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = viewModel::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.primary) }
                     Column(Modifier.weight(1f)) {
-                        Text("GabAI", style = MaterialTheme.typography.titleMedium, color = colors.primary, modifier = Modifier.semantics { heading() })
+                        Text(panelTitle, style = MaterialTheme.typography.titleMedium, color = colors.primary, modifier = Modifier.semantics { heading() })
                         Text(title, style = MaterialTheme.typography.labelSmall, color = colors.textMuted, maxLines = 1)
                     }
                     IconButton(onClick = { viewModel.setSidebarOpen(false) }) {
-                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, contentDescription = "Hide GabAI panel", tint = colors.primary)
+                        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, contentDescription = "Hide $panelTitle panel", tint = colors.primary)
                     }
                 }
                 Column(
@@ -136,7 +137,7 @@ internal fun GabAiStageStep(
                     .background(colors.background.copy(alpha = 0.92f))
                     .clickable(role = Role.Button) { viewModel.setSidebarOpen(true) }
                     .padding(horizontal = 8.dp, vertical = 16.dp)
-                    .semantics { contentDescription = "Show GabAI panel" },
+                    .semantics { contentDescription = "Show $panelTitle panel" },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = colors.secondary)
@@ -151,6 +152,9 @@ internal fun GabAiStageStep(
         }
     }
 }
+
+/** The sidebar's header: manual mapping reuses these steps without GabAI's assistance, so it says so. */
+internal fun stagePanelTitle(manual: Boolean): String = if (manual) "Manual Mapping" else "GabAI"
 
 private val SidebarShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)
 

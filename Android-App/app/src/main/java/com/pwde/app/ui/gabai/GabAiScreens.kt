@@ -146,14 +146,15 @@ internal fun GabAiStep(
     title: String,
     says: String,
     voiceHint: String,
+    panelTitle: String,
     footer: (@Composable () -> Unit)? = null,
     bottomBar: (@Composable () -> Unit)? = null,
     compactSays: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     PwdeScreen(
-        // Always GabAI on top, like a chat; the step or section is the subheader.
-        title = "GabAI",
+        // The flow on top (GabAI, or Manual Mapping), like a chat; the step or section is the subheader.
+        title = panelTitle,
         subtitle = title,
         // Tab screens (with a bottom bar) have no back arrow; system back still works.
         onBack = if (bottomBar == null) viewModel::back else null,
@@ -231,6 +232,7 @@ private fun WelcomeStep(viewModel: GabAiViewModel, ui: GabAiUiState, onTab: (Mai
     }
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Welcome",
         says = "Hi, I'm GabAI! I'll walk you through setting up PWDe one small step at a time. What would you like to do?",
         voiceHint = "Say \"new calibration\", \"new game\" or \"continue\"",
@@ -304,6 +306,7 @@ private fun CursorAxisStep(viewModel: GabAiViewModel, ui: GabAiUiState, axis: Ax
     val overlayDrawn = overlayDrawsPointer()
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Cursor: ${axis.label}",
         says = axisSays(axis),
         voiceHint = "Say \"faster\", \"slower\", \"recenter\" or \"next\"",
@@ -388,6 +391,7 @@ private fun JoystickStep(viewModel: GabAiViewModel, ui: GabAiUiState, parameter:
     }
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Joystick: ${parameter.label}",
         says = joystickSays(parameter),
         voiceHint = joystickVoiceHint(parameter),
@@ -455,6 +459,7 @@ private fun VoiceStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     }
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Calibration: Voice",
         says = "Now, voice. Choose how strictly I match your words and when I act on them. Then we'll try some face gestures.",
         voiceHint = "Say \"word anywhere\", \"right away\" or \"next\"",
@@ -520,6 +525,7 @@ private fun GestureTestStep(viewModel: GabAiViewModel, ui: GabAiUiState, test: G
     }
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Gesture: ${gesture.label}",
         says = if (passed) "Got it! ${gesture.label} is on."
         else "${gesture.description}. Can't do it comfortably? Skip it — I'll only turn on the gestures you can do.",
@@ -587,6 +593,7 @@ private fun GestureReviewStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     VoiceCommandsEffect(GESTURE_REVIEW_COMMANDS) { id -> if (id == "save") viewModel.saveCalibration() else viewModel.retryMissedGestures() }
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Calibration: Gestures",
         says = when {
             on.isEmpty() -> "No gestures are on this time, and that's fine — everything else still works. "
@@ -618,6 +625,7 @@ private fun CalibrationSavedStep(viewModel: GabAiViewModel, ui: GabAiUiState) {
     val nextGame = ui.form.continueToGame || ui.form.gameId != null
     GabAiStep(
         viewModel, ui,
+        panelTitle = ui.panelTitle,
         title = "Calibration saved",
         says = "Saved \"${ui.form.calibrationName}\"! It's your active setup now. " +
                 if (nextGame) "Let's carry on with your game." else "Want to set up a game with it?",
