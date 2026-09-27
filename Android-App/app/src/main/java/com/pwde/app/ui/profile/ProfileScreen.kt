@@ -33,6 +33,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.AlertDialog
@@ -184,6 +185,7 @@ internal val PROFILE_COMMANDS = listOf(
     voiceCommand("sign_in", "sign in", "sync"),
     voiceCommand("appearance", "appearance"),
     voiceCommand("controls", "controls"),
+    voiceCommand("redo_onboarding", "redo onboarding", "run setup again", "redo setup", "restart setup"),
 ) + Game.entries.map { voiceCommand("folder:${it.id}", it.displayName) } + MainTab.entries.filter { it != MainTab.PROFILE }.map { voiceCommand("tab:${it.name}", it.label) }
 
 /** H1 Profile. Local profiles from Room, sign-in entry for guests, sync status for signed-in users. */
@@ -197,6 +199,7 @@ fun ProfileScreen(
     onNewWithGabAi: () -> Unit,
     onEditCalibration: (Long) -> Unit,
     onEditAppearance: () -> Unit,
+    onRedoOnboarding: () -> Unit,
     onControls: () -> Unit,
     onTab: (MainTab) -> Unit,
 ) {
@@ -205,6 +208,7 @@ fun ProfileScreen(
     val signedIn = state.auth as? AuthState.SignedIn
     val name = signedIn?.let { it.displayName ?: it.email } ?: "Guest"
     var dialog by remember { mutableStateOf<ProfileDialog?>(null) }
+    var confirmRedo by rememberSaveable { mutableStateOf(false) }
     val notice by viewModel.notice.collectAsStateWithLifecycle()
     // Game ids whose folder is expanded; closed by default so the list stays short.
     var openFolders by rememberSaveable { mutableStateOf(emptyList<String>()) }
@@ -218,6 +222,7 @@ fun ProfileScreen(
             id == "sign_in" -> if (signedIn == null) onSignIn()
             id == "appearance" -> onEditAppearance()
             id == "controls" -> onControls()
+            id == "redo_onboarding" -> confirmRedo = true
             id == "gabai" -> onNewWithGabAi()
         }
     }
@@ -306,7 +311,7 @@ fun ProfileScreen(
                             )
                         }
                         PwdeButton(
-                            "Edit buttons",
+                            "Edit buttons & mappings",
                             { onEditGameProfile(it.id) },
                             style = ButtonStyle.SECONDARY,
                             icon = Icons.Outlined.AutoAwesome,
@@ -321,6 +326,33 @@ fun ProfileScreen(
         SectionTitle("Settings")
         NavCard("Appearance", "Colors, text size, layout", Icons.Outlined.Palette, onEditAppearance)
         NavCard("Controls", "Input, gestures, voice", Icons.Outlined.Tune, onControls)
+        SectionTitle("Onboarding")
+        NavCard(
+            "Redo onboarding",
+            "Walk through permissions and cursor setup again",
+            Icons.Outlined.RestartAlt,
+            { confirmRedo = true },
+        )
+        InfoNote(
+            "Your profiles, games and gestures are kept — this only asks for permissions again and " +
+                "re-tunes the pointer. Use Appearance for colours and text size only.",
+        )
+    }
+
+    if (confirmRedo) {
+        AlertDialog(
+            onDismissRequest = { confirmRedo = false },
+            icon = { Icon(Icons.Outlined.RestartAlt, contentDescription = null) },
+            title = { Text("Redo onboarding?") },
+            text = {
+                Text(
+                    "You'll be asked for permissions again and walked through calibrating the pointer. " +
+                        "Your saved profiles, games and gesture mappings are not deleted.",
+                )
+            },
+            confirmButton = { PwdeButton("Redo onboarding", { confirmRedo = false; onRedoOnboarding() }, contentPadding = buttonPadding()) },
+            dismissButton = { PwdeButton("Cancel", { confirmRedo = false }, style = ButtonStyle.SECONDARY, contentPadding = buttonPadding()) },
+        )
     }
 }
 

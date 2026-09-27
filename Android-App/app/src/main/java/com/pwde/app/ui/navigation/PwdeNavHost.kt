@@ -262,17 +262,23 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
                 },
                 onExit = ::back,
                 onFinished = {
-                    if (appearanceOnly) back() else navController.navigate(Routes.VOICE_TUTORIAL)
+                    if (appearanceOnly) back() else navController.navigate(Routes.voiceTutorial())
                 },
             )
         }
-        composable(Routes.VOICE_TUTORIAL) {
+        composable(
+            Routes.VOICE_TUTORIAL,
+            arguments = listOf(navArgument("replay") { type = NavType.BoolType; defaultValue = false }),
+        ) { entry ->
+            // Reached from Profile, the tutorial is a replay: its "finished" flag is already set, so
+            // returning to Dashboard would be wrong — the user gets back what they came from.
+            val replay = entry.arguments?.getBoolean("replay") ?: false
             VoiceTutorialScreen(
                 viewModel = pwdeViewModel {
                     VoiceTutorialViewModel(it.settingsRepository, it.speechOutput, it.isSystemScreenReaderOn())
                 },
                 onExit = ::back,
-                onFinished = ::enterMainApp,
+                onFinished = { if (replay) back() else enterMainApp() },
             )
         }
 
@@ -471,6 +477,7 @@ fun PwdeNavHost(navController: NavHostController = rememberNavController()) {
                 onNewWithGabAi = { navController.navigate(Routes.gabai()) },
                 onEditCalibration = { navController.navigate(Routes.calibrationEditor(it)) },
                 onEditAppearance = { navController.navigate(Routes.setup(appearanceOnly = true)) },
+                onRedoOnboarding = { navController.navigate(Routes.setup()) },
                 onControls = { navController.navigate(Routes.CONTROLS) },
                 onTab = ::openTab,
             )

@@ -149,6 +149,8 @@ The back arrow, the system back gesture and voice "back" always do the same thin
 - [ ] GabAI game profile → save → Play → back → the screen GabAI was opened from
 - [ ] Setup: permissions step asks for the camera first, then the microphone; back exits to Welcome (camera + mic are required, so Skip is hidden until both are on); cursor calibration → back → permissions → back → Welcome; Voice tutorial likewise
 - [ ] Profile → Edit appearance → back → Profile
+- [ ] Profile → Redo onboarding → confirm → permissions → cursor calibration → Continue → Voice tutorial → Finish → back on Profile (a replay returns where it was opened, not the Dashboard)
+- [ ] Profile → Redo onboarding → Cancel → stays on Profile
 - [ ] On Dashboard, saying "back" does nothing (the app stays open)
 
 ## Real vs. placeholder in this build
@@ -167,7 +169,7 @@ The back arrow, the system back gesture and voice "back" always do the same thin
 | GabAI | Real: calibration and game-profile flows, resumable after a force-close |
 | Games, game detail | Real: play, edit or create profiles per game; voice-selectable |
 | Playing view | Live overlay over your game screenshot (or a simulated arena). Mapped buttons are pressed by voice (sherpa-onnx keyword spotting), gesture or joystick |
-| Profile | Real: profile lists with rename/delete, "Use now" for calibrations, Play/Edit for game profiles, sync status |
+| Profile | Real: profile lists with rename/delete, "Use now" for calibrations, Play/Edit for game profiles, sync status, and **Redo onboarding** to walk setup again |
 
 ## Default controls
 
