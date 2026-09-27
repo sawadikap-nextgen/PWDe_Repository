@@ -90,7 +90,14 @@ class ProfileRepositoryTest {
         controls.setVoiceShortcut(VoiceShortcut.CURSOR_MODE, "pointer")
 
         val config = controls.config.first()
-        assertEquals(mapOf(GestureAction.SELECT to FacialGesture.OPEN_MOUTH), config.gestureAssignments)
+        // SELECT was set explicitly; Recenter keeps its default; BACK was set and then cleared again.
+        assertEquals(
+            mapOf(
+                GestureAction.SELECT to FacialGesture.OPEN_MOUTH,
+                GestureAction.RECENTER to FacialGesture.OPEN_MOUTH,
+            ),
+            config.gestureAssignments,
+        )
         assertEquals(VoiceMatchMode.EXACT, config.voiceMatchMode)
         assertEquals("pointer", config.voiceShortcuts[VoiceShortcut.CURSOR_MODE])
     }

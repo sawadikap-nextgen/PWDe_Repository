@@ -108,6 +108,21 @@ enum class GestureAction(val label: String) {
     ALL_APPS("All apps"),
 }
 
+/**
+ * The gesture actions a fresh install already has mapped, before the user changes anything.
+ *
+ * Both picks are the easiest curated gesture to make on purpose and to stop again, they read cleanly
+ * from the front camera (`mouthSmile` averaged for Select, `jawOpen` for Recenter — see
+ * `GestureClassifier`), and they are unmistakable in a live preview. So a new user can press the
+ * thing the pointer is on and bring it back to the middle without mapping anything first. Setup says
+ * so out loud, and every mapping stays editable in Controls → Gestures.
+ */
+val DEFAULT_GESTURE_ASSIGNMENTS: Map<GestureAction, FacialGesture> =
+    mapOf(
+        GestureAction.SELECT to FacialGesture.SMILE,
+        GestureAction.RECENTER to FacialGesture.OPEN_MOUTH,
+    )
+
 enum class VoiceMatchMode(val label: String, val description: String) {
     EXACT("Match: exact phrase", "Only \"attack\" by itself"),
     WORD_ANYWHERE("Match: word anywhere", "\"go attack now\" also works"),
@@ -198,7 +213,7 @@ fun navigationModeFor(override: NavigationMode?, outputMode: FaceOutputMode): Na
 
 /** The user's working controls configuration (not yet saved as a named profile). */
 data class ControlConfig(
-    val gestureAssignments: Map<GestureAction, FacialGesture> = emptyMap(),
+    val gestureAssignments: Map<GestureAction, FacialGesture> = DEFAULT_GESTURE_ASSIGNMENTS,
     val gestureSensitivity: Map<FacialGesture, Int> = emptyMap(),
     val enabledGestures: Set<FacialGesture>? = null,
     val voiceEnabled: Boolean = true,
