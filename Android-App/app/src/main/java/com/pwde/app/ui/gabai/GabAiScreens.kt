@@ -246,9 +246,7 @@ private fun WelcomeStep(viewModel: GabAiViewModel, ui: GabAiUiState, onTab: (Mai
         NavCard("New Game Profile", "Map a game's buttons to your moves", Icons.Outlined.SportsEsports, { viewModel.startGameProfile() })
         val resumable = ui.resumable
         if (resumable != null) {
-            NavCard("Continue Existing", "Pick up where you left off: ${resumable.state.summary}", Icons.Outlined.History, viewModel::resume)
-        } else {
-            InfoNote("Nothing unfinished to continue. Anything you start is saved step by step, so you can always come back to it.")
+            NavCard("Continue Creating", "Pick up where you left off: ${resumable.state.summary}", Icons.Outlined.History, viewModel::resume)
         }
         if (gameProfiles.isNotEmpty()) {
             var showAll by rememberSaveable { mutableStateOf(false) }
