@@ -506,11 +506,12 @@ internal val TRIGGER_COMMANDS = listOf(
     voiceCommand("type:GESTURE", "gesture", "head gesture"),
     voiceCommand("previous_button", "previous button", "previous"),
     voiceCommand("next_button", "next button"),
-    // Moves on to testing, like the sidebar's "Next".
-    voiceCommand("next_step", "next"),
-    voiceCommand("done", "done", "done mapping"),
+    // Moves on to testing, like the sidebar's "Next", even with a button's chooser open.
+    voiceCommand("next_step", "next", "done mapping"),
+    // Closes the open chooser; with none open, also moves on.
+    voiceCommand("done", "done"),
     voiceCommand("close", "close", "cancel"),
-    voiceCommand("use_all_suggested", "use all suggested words", "auto map"), // Added
+    voiceCommand("use_all_suggested", "suggested words", "use all suggested words", "auto map"),
 ) + JoystickDirection.entries.filter { it != JoystickDirection.CENTER }
     .map { voiceCommand("dir:${it.name}", "stick ${it.label.lowercase()}") }
 private val TRIGGER_PANEL_COMMANDS = listOf(

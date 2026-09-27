@@ -2,7 +2,9 @@ package com.pwde.app.data.gabai
 
 import com.google.gson.Gson
 import com.pwde.app.data.model.ButtonTrigger
+import com.pwde.app.data.model.FacialGesture
 import com.pwde.app.data.model.MappedButton
+import com.pwde.app.data.model.TriggerType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -138,6 +140,22 @@ fun detectedToButtons(detected: List<DetectedButton>, firstId: Int): List<Mapped
         val n = (counts[d.className] ?: 0) + 1
         counts[d.className] = n
         MappedButton(id++, if ((totals[d.className] ?: 0) > 1) "$base $n" else base, d.x, d.y)
+    }
+}
+
+/**
+ * The gestures a game's detected buttons start with, by the label [detectedToButtons] gives them.
+ * Everything else starts unmapped; the user can change any of these in the trigger step.
+ */
+private val DEFAULT_GESTURES: Map<String, Map<String, FacialGesture>> = mapOf(
+    "mobile_legends" to mapOf("Skill button 1" to FacialGesture.SMILE, "Skill button 3" to FacialGesture.PUCKER),
+)
+
+/** [buttons] with [gameId]'s default gestures set on the buttons that have one. */
+fun withGameDefaults(gameId: String?, buttons: List<MappedButton>): List<MappedButton> {
+    val defaults = DEFAULT_GESTURES[gameId] ?: return buttons
+    return buttons.map { button ->
+        defaults[button.label]?.let { button.copy(trigger = ButtonTrigger(TriggerType.GESTURE, it.name)) } ?: button
     }
 }
 

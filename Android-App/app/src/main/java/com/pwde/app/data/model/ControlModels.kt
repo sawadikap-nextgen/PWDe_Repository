@@ -127,16 +127,16 @@ enum class GestureAction(val label: String) {
 /**
  * The gesture actions a fresh install already has mapped, before the user changes anything.
  *
- * Both picks are the easiest curated gesture to make on purpose and to stop again, they read cleanly
- * from the front camera (`mouthSmile` averaged for Select, `jawOpen` for Recenter — see
- * `GestureClassifier`), and they are unmistakable in a live preview. So a new user can press the
- * thing the pointer is on and bring it back to the middle without mapping anything first. Setup says
- * so out loud, and every mapping stays editable in Controls → Gestures.
+ * Smile selects, raised eyebrows recenter and an open mouth locks the center, so a new user can press
+ * what the pointer is on, bring it back to the middle and hold the movement stick still without
+ * mapping anything first. All three read cleanly from the front camera (see `GestureClassifier`).
+ * Setup says so out loud, and every mapping stays editable in Controls → Gestures.
  */
 val DEFAULT_GESTURE_ASSIGNMENTS: Map<GestureAction, FacialGesture> =
     mapOf(
         GestureAction.SELECT to FacialGesture.SMILE,
-        GestureAction.RECENTER to FacialGesture.OPEN_MOUTH,
+        GestureAction.RECENTER to FacialGesture.EYEBROW_RAISE,
+        GestureAction.LOCK_CENTER to FacialGesture.OPEN_MOUTH,
     )
 
 enum class VoiceMatchMode(val label: String, val description: String) {

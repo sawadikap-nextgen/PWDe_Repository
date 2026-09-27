@@ -211,11 +211,12 @@ class SetupViewModelTest {
     }
 
     @Test
-    fun aFreshInstallAlreadyMapsSelectAndRecenter() = runBlocking {
+    fun aFreshInstallAlreadyMapsSelectRecenterAndLockCenter() = runBlocking {
         assertEquals(
             mapOf(
                 GestureAction.SELECT to FacialGesture.SMILE,
-                GestureAction.RECENTER to FacialGesture.OPEN_MOUTH,
+                GestureAction.RECENTER to FacialGesture.EYEBROW_RAISE,
+                GestureAction.LOCK_CENTER to FacialGesture.OPEN_MOUTH,
             ),
             controls.config.first().gestureAssignments,
         )

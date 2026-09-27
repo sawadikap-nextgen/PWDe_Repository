@@ -512,7 +512,7 @@ private fun CursorCalibrationStep(state: SetupUiState, viewModel: SetupViewModel
         modifier = Modifier.fillMaxWidth(),
     )
     LevelSlider(if (axis == Axis.DIAGONAL) "Smoothing" else "Speed moving ${axis.label.lowercase()}", level, ::set)
-    InfoNote("Smile to select; open your mouth to recenter.", icon = Icons.Outlined.CheckCircle)
+    InfoNote("Smile to select, raise your eyebrows to recenter, open your mouth to lock the center.", icon = Icons.Outlined.CheckCircle)
 }
 
 /** Where the target sits for each direction. */

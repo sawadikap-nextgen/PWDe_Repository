@@ -2,6 +2,9 @@ package com.pwde.app.gabai
 
 import com.pwde.app.data.gabai.DetectedButton
 import com.pwde.app.data.gabai.detectedToButtons
+import com.pwde.app.data.gabai.withGameDefaults
+import com.pwde.app.data.model.FacialGesture
+import com.pwde.app.data.model.TriggerType
 import com.pwde.app.data.model.ButtonTrigger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -74,5 +77,16 @@ class DetectedButtonsTest {
         assertEquals(ButtonTrigger.MOVEMENT, buttons[0].trigger)
         assertNull(buttons[1].trigger)
         assertEquals("Joystick", buttons[1].label)
+    }
+
+    @Test
+    fun mobileLegendsSkillsOneAndThreeStartOnSmileAndPucker() {
+        val detected = listOf(0.6f, 0.7f, 0.8f).map { DetectedButton("skill_button", 0.9f, it, 0.8f) }
+        val buttons = withGameDefaults("mobile_legends", detectedToButtons(detected, 1))
+        assertEquals(ButtonTrigger(TriggerType.GESTURE, FacialGesture.SMILE.name), buttons.first { it.label == "Skill button 1" }.trigger)
+        assertNull(buttons.first { it.label == "Skill button 2" }.trigger)
+        assertEquals(ButtonTrigger(TriggerType.GESTURE, FacialGesture.PUCKER.name), buttons.first { it.label == "Skill button 3" }.trigger)
+        // Other games start unmapped.
+        assertNull(withGameDefaults("clash_royale", detectedToButtons(detected, 1)).first().trigger)
     }
 }

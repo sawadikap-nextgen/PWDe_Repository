@@ -16,6 +16,7 @@ import com.pwde.app.data.gabai.GabAiState
 import com.pwde.app.data.gabai.JoystickParameter
 import com.pwde.app.data.gabai.HudDetector
 import com.pwde.app.data.gabai.detectedToButtons
+import com.pwde.app.data.gabai.withGameDefaults
 import com.pwde.app.data.local.CalibrationProfile
 import com.pwde.app.data.local.ControlJson
 import com.pwde.app.data.local.ControlsRepository
@@ -504,7 +505,7 @@ class GabAiViewModel(
                 message("No buttons found on this screenshot — you can place them yourself next.")
                 return
             }
-            val buttons = detectedToButtons(detected, nextButtonId)
+            val buttons = withGameDefaults(gameId, detectedToButtons(detected, nextButtonId))
             nextButtonId += buttons.size
             editButtons { buttons }
             val stick = if (buttons.any { it.trigger == ButtonTrigger.MOVEMENT }) ", including the movement joystick" else ""
@@ -913,7 +914,9 @@ class GabAiViewModel(
         // Apply the auto-mapping
         val gameId = _ui.value.form.gameId
         // The movement joystick keeps its joystick trigger; a spoken word can't steer it.
-        currentButtons.filter { it.trigger?.type != TriggerType.MOVEMENT }.forEach { button ->
+        // The game's default gestures (Mobile Legends' skill 1 and 3) are kept too.
+        val defaults = withGameDefaults(gameId, currentButtons.map { it.copy(trigger = null) }).filter { it.trigger != null }.map { it.id }.toSet()
+        currentButtons.filter { it.trigger?.type != TriggerType.MOVEMENT && it.id !in defaults }.forEach { button ->
             setTrigger(button.id, ButtonTrigger(TriggerType.VOICE, SuggestedPhrases.forButton(gameId, button.label)))
         }
 
