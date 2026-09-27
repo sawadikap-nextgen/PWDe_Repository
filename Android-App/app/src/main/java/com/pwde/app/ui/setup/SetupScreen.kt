@@ -164,12 +164,12 @@ fun SetupScreen(viewModel: SetupViewModel, onExit: () -> Unit, onFinished: () ->
             )
             SetupStep.PERMISSIONS -> Triple(
                 "Allow camera and microphone",
-                "PWDe asks Android for the camera first, then the microphone, as soon as this screen opens. Both are needed for head and voice control.",
+                "Needed for head and voice control.",
                 "Say \"allow\" to ask again",
             )
             SetupStep.CURSOR_CALIBRATION -> Triple(
                 "Calibrate your cursor",
-                "GabAI walks you through moving the pointer in each direction so it matches how you move your head.",
+                "Match the pointer to how you move your head.",
                 "Say \"faster\", \"slower\", \"recenter\" or \"next\"",
             )
         }
@@ -419,7 +419,7 @@ private fun PermissionsStep(
     if (camera && mic) {
         StatusPill("Camera and microphone allowed", color = PwdeTheme.colors.success, icon = Icons.Outlined.Check)
     } else {
-        InfoNote("PWDe can't follow your head or hear commands without both. Allow camera and microphone to continue.")
+        InfoNote("Allow both to continue.")
         if (asked) {
             PwdeButton(
                 "Open app settings",
@@ -431,11 +431,7 @@ private fun PermissionsStep(
         }
     }
     if (!accessibility) {
-        InfoNote(
-            "Turn the accessibility service on too, or PWDe's controls can't reach your games. " +
-                "It opens Android Settings — come back and this screen updates by itself.",
-            icon = Icons.Outlined.Settings,
-        )
+        InfoNote("Also turn on the accessibility service so PWDe can reach your games.", icon = Icons.Outlined.Settings)
     }
 }
 
@@ -443,11 +439,11 @@ private fun Context.isGranted(permission: String): Boolean =
     ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
 private fun axisSays(axis: Axis) = when (axis) {
-    Axis.UP -> "Look up to move the pointer onto the top target. Change the speed until it feels comfortable."
+    Axis.UP -> "Look up to reach the top target. Adjust the speed to feel comfortable."
     Axis.DOWN -> "Now look down to reach the bottom target."
     Axis.LEFT -> "Turn your head left to reach the left target."
     Axis.RIGHT -> "And right, to the right target."
-    Axis.DIAGONAL -> "Last one: move to a corner target. If the pointer shakes, add smoothing; if it lags, take some away."
+    Axis.DIAGONAL -> "Last one: reach a corner. Shaky? Add smoothing. Laggy? Reduce it."
 }
 
 /**
@@ -516,12 +512,7 @@ private fun CursorCalibrationStep(state: SetupUiState, viewModel: SetupViewModel
         modifier = Modifier.fillMaxWidth(),
     )
     LevelSlider(if (axis == Axis.DIAGONAL) "Smoothing" else "Speed moving ${axis.label.lowercase()}", level, ::set)
-    InfoNote(
-        "Smiling is already set up as your Select gesture and opening your mouth as Recenter, so " +
-            "you can press what the pointer is on and bring it back to the middle. Change either " +
-            "any time in Controls, then Gestures.",
-        icon = Icons.Outlined.CheckCircle,
-    )
+    InfoNote("Smile to select; open your mouth to recenter.", icon = Icons.Outlined.CheckCircle)
 }
 
 /** Where the target sits for each direction. */

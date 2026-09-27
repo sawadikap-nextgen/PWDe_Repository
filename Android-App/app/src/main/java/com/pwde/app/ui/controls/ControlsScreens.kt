@@ -126,7 +126,7 @@ fun ControlsHubScreen(onBack: () -> Unit, onOpen: (ControlsDestination) -> Unit)
     }
     PwdeScreen(
         title = "Controls",
-        subtitle = "Everything that controls your games.",
+        subtitle = null,
         onBack = onBack,
         voiceHint = "Say a card's name, like \"joystick\"",
     ) {
@@ -145,9 +145,9 @@ private fun MappingChoiceDialog(onGuided: () -> Unit, onManual: () -> Unit, onDi
     VoiceCommandsEffect(MAPPING_CHOICE_COMMANDS) { id -> if (id == GUIDED_MAPPING) onGuided() else onManual() }
     PwdeDialog(onDismiss = onDismiss, title = "Map a game's buttons") {
         PwdeButton("Guided (GabAI)", onGuided, icon = Icons.Outlined.AutoAwesome, modifier = Modifier.fillMaxWidth())
-        Text("GabAI finds the buttons on your screenshot and walks you through setup.", style = MaterialTheme.typography.bodySmall, color = PwdeTheme.colors.textMuted)
+        Text("GabAI finds the buttons for you.", style = MaterialTheme.typography.bodySmall, color = PwdeTheme.colors.textMuted)
         PwdeButton("Manual mapping", onManual, style = ButtonStyle.SECONDARY, icon = Icons.Outlined.TouchApp, modifier = Modifier.fillMaxWidth())
-        Text("Place the buttons yourself, then pick what presses each. No calibration or detection.", style = MaterialTheme.typography.bodySmall, color = PwdeTheme.colors.textMuted)
+        Text("Place and assign buttons yourself.", style = MaterialTheme.typography.bodySmall, color = PwdeTheme.colors.textMuted)
     }
 }
 
@@ -187,7 +187,7 @@ fun InputModeScreen(viewModel: InputModeViewModel, onBack: () -> Unit) {
     }
     PwdeScreen(
         title = "Input",
-        subtitle = "Your main way to control games. Saved automatically.",
+        subtitle = "Saved automatically.",
         onBack = onBack,
         voiceHint = "Say \"head\", \"joystick\", \"voice\", \"gyro mode\" or \"head tracking\"",
     ) {
@@ -228,12 +228,8 @@ fun InputModeScreen(viewModel: InputModeViewModel, onBack: () -> Unit) {
             }
         }
         InfoNote(
-            "Head & face and Voice move a pointer with your head. Joystick turns tilt into an 8-way joystick, " +
-                    "steered either by your head or by tilting the phone itself — gyro tracking needs no camera at all. " +
-                    "Switch any time by saying \"cursor mode\", \"joystick mode\", \"gyro mode\" or \"head tracking\". " +
-                    "Cursor mode is navigation mode, so \"home\", \"back\", \"recent apps\" and \"notifications\" work. " +
-                    "Joystick mode is game mode: those are off there, so a stray word can't pull you out of a match. " +
-                    "Say \"game mode\" or \"navigation mode\" to change that for the session.",
+            "Say \"cursor mode\", \"joystick mode\", \"gyro mode\" or \"head tracking\" to switch any time. " +
+                    "Joystick mode turns off \"back\" and \"home\"; say \"navigation mode\" to allow them.",
         )
     }
 }
@@ -264,7 +260,7 @@ fun GesturesScreen(viewModel: GesturesViewModel, onBack: () -> Unit, onChoose: (
     }
     PwdeScreen(
         title = "Gestures",
-        subtitle = "Pick a face move for each action.",
+        subtitle = null,
         onBack = onBack,
         voiceHint = "Say \"change select\" or \"next page\"",
         footer = { Pager(page, pages.size, { page-- }, { page++ }) },
@@ -303,12 +299,7 @@ fun GesturesScreen(viewModel: GesturesViewModel, onBack: () -> Unit, onChoose: (
                 }
             }
         }
-        InfoNote(
-            "Gestures fire their actions in PWDe's play overlay. Notifications, All apps and Touch & hold need " +
-                    "system access PWDe doesn't have, so they act inside the overlay only, not on the rest of your phone. " +
-                    "Center and Lock center always work in game mode too: Lock center holds the movement stick still " +
-                    "until you make the same face again.",
-        )
+        InfoNote("Notifications, All apps and Touch & hold only work inside PWDe's overlay. Lock center holds the stick until you repeat the face.")
     }
 }
 
@@ -354,7 +345,7 @@ fun ChooseGestureScreen(viewModel: ChooseGestureViewModel, onBack: () -> Unit) {
     }
     PwdeScreen(
         title = "Gesture for \"${state.action.label}\"",
-        subtitle = "Pick one. Moves already in use are marked.",
+        subtitle = "Moves in use are marked.",
         onBack = onBack,
         voiceHint = "Say a gesture's name, like \"smile\"",
         footer = {
@@ -366,7 +357,7 @@ fun ChooseGestureScreen(viewModel: ChooseGestureViewModel, onBack: () -> Unit) {
     ) {
         SegmentedToggle(GestureCatalog.entries, catalog, { it.label }, { catalog = it })
         if (catalog == GestureCatalog.MEDIAPIPE) {
-            InfoNote("Each MediaPipe face score on its own, named as MediaPipe names them. Say a name like \"brow inner up\".")
+            InfoNote("Say a name like \"brow inner up\".")
         }
         catalog.gestures.chunked(2).forEach { row ->
             Row(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(PwdeTheme.spacing.itemGap)) {
@@ -414,7 +405,7 @@ private fun TryGesture(viewModel: ChooseGestureViewModel, gesture: FacialGesture
             when {
                 detected -> "Detected!"
                 face.isGyro && face.gesture.measures[gesture] == null ->
-                    "With a gyro joystick, the phone's tilt steers: head tilt, nod and shake are off, and face expressions need your face in view."
+                    "Gyro joystick: head tilt, nod and shake are off."
                 face.isSimulated && face.gesture.measures[gesture] == null -> "Demo mode can only simulate tilt, nod and shake."
                 !face.hasFace -> "Face the camera to try it."
                 else -> "Do the move — the bar passes the white tick when PWDe sees it."
@@ -515,7 +506,7 @@ fun CursorSpeedScreen(viewModel: CursorSpeedViewModel, onBack: () -> Unit) {
     }
     PwdeScreen(
         title = "Cursor speed",
-        subtitle = "How the pointer follows your head. Saved automatically.",
+        subtitle = "Saved automatically.",
         onBack = onBack,
         voiceHint = "Say \"faster\", \"slower\", \"recenter\" or \"advanced\"",
     ) {
@@ -553,7 +544,7 @@ fun CursorSpeedScreen(viewModel: CursorSpeedViewModel, onBack: () -> Unit) {
             LevelSlider("Moving right", t.speedRight, { level -> viewModel.update { it.copy(speedRight = level) } })
         }
         LevelSlider("Smoothing", t.smoothing, { level -> viewModel.update { it.copy(smoothing = level) } })
-        InfoNote("More smoothing steadies a shaky pointer but makes it a little slower to react.")
+        InfoNote("More smoothing: steadier, but slower to react.")
     }
 }
 
@@ -638,18 +629,12 @@ fun JoystickScreen(viewModel: JoystickViewModel, onBack: () -> Unit) {
             LevelSlider("Sensitivity", t.sensitivity, { level -> viewModel.update { it.copy(sensitivity = level) } })
         } else {
             LevelSlider("Dead zone", t.deadZone, { level -> viewModel.update { it.copy(deadZone = level) } })
-            InfoNote(
-                "A bigger dead zone ignores small " + (if (gyro) "phone movements" else "head movements") +
-                    ", so the joystick doesn't drift while you rest.",
-            )
+            InfoNote("A bigger dead zone ignores small " + (if (gyro) "phone" else "head") + " movements.")
             val smoothingLevel = smoothing ?: return@PwdeScreen
             LevelSlider("Smoothing", smoothingLevel, viewModel::setSmoothing)
-            InfoNote("More smoothing steadies a shaky stick but makes it a little slower to react. Shared with the pointer.")
+            InfoNote("More smoothing: steadier, but slower. Shared with the pointer.")
             if (gyro) {
-                InfoNote(
-                    "Gyro tracking keeps no saved center: however you are holding the phone is straight ahead, " +
-                        "and \"Set center here\" re-takes that without touching the head's saved center.",
-                )
+                InfoNote("Gyro's center is however you hold the phone now.")
             } else {
                 PwdeButton("Reset center to straight ahead", viewModel::resetCenter, style = ButtonStyle.SECONDARY, modifier = Modifier.fillMaxWidth())
             }

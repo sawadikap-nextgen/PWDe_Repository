@@ -74,7 +74,7 @@ fun SignInScreen(
 
     PwdeScreen(
         title = "Sign in",
-        subtitle = "Optional — signing in only adds cloud sync for your profiles.",
+        subtitle = "Optional — adds cloud sync.",
         onBack = onBack,
         voiceHint = "Say \"sign in\" or a field name",
         footer = {
@@ -103,7 +103,7 @@ fun ForgotPasswordScreen(viewModel: AuthViewModel, onBack: () -> Unit) {
     VoiceCommandsEffect(RESET_COMMANDS) { viewModel.sendReset() }
     PwdeScreen(
         title = "Reset password",
-        subtitle = "We'll email you a link to set a new password.",
+        subtitle = "We'll email you a reset link.",
         onBack = onBack,
         voiceHint = "Say \"send link\"",
         footer = {
@@ -125,7 +125,6 @@ fun ForgotPasswordScreen(viewModel: AuthViewModel, onBack: () -> Unit) {
             keyboardType = KeyboardType.Email,
             enabled = state.cloudAvailable,
         )
-        InfoNote("No rush — the link stays valid for a while, so take your time.")
         ErrorNote(state.error)
         state.info?.let { InfoNote(it, icon = Icons.Outlined.MarkEmailRead) }
     }
@@ -147,7 +146,7 @@ fun CreateAccountScreen(
 
     PwdeScreen(
         title = "Create your account",
-        subtitle = "Three fields. Your guest settings carry over.",
+        subtitle = "Your guest settings carry over.",
         onBack = onBack,
         voiceHint = "Say \"next\" when you're done",
         footer = {

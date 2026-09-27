@@ -285,7 +285,7 @@ fun ProfileScreen(
 
         SectionTitle("Game profiles")
         if (state.gameProfiles.isEmpty()) {
-            InfoNote("No game profiles yet. GabAI makes one for each game: you mark its buttons and pick how to press them.")
+            InfoNote("No game profiles yet. GabAI will help you make one.")
         } else {
             gameFolders(state.gameProfiles).forEach { folder ->
                 val open = folder.gameId in openFolders
@@ -337,10 +337,7 @@ fun ProfileScreen(
             Icons.Outlined.RestartAlt,
             { confirmRedo = true },
         )
-        InfoNote(
-            "Your profiles, games and gestures are kept — this only asks for permissions again and " +
-                "re-tunes the pointer. Use Appearance for colours and text size only.",
-        )
+        InfoNote("Keeps your profiles; only redoes permissions and pointer tuning.")
     }
 
     if (confirmRedo) {
@@ -550,7 +547,7 @@ private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () 
                         Column(Modifier.weight(1f)) {
                             Text("Saved on this phone", style = MaterialTheme.typography.titleMedium, color = colors.text)
                             Text(
-                                "Sign in to sync your profiles across devices. Nothing here is lost when you do.",
+                                "Sign in to sync across devices. Nothing is lost.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textMuted,
                             )
@@ -585,7 +582,7 @@ private fun SyncCard(state: ProfileUiState, onSignIn: () -> Unit, onSignOut: () 
                         when (val status = state.syncStatus) {
                             is SyncStatus.Error -> status.message
                             SyncStatus.NotAvailable -> "You're signed in. Your profiles are safe on this phone."
-                            else -> "Your profiles, controls and settings sync to your account on their own. Nothing here is lost when you sign out."
+                            else -> "Your profiles and settings sync automatically."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.textMuted,
