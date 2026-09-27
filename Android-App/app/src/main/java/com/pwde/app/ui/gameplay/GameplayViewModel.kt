@@ -273,6 +273,8 @@ class GameplayViewModel(
                 if (carryOut) livePlay?.perform(command)
                 post("Drop", OverlayEvent.Kind.ACTION)
             }
+            // Only a gesture produces this, and the overlay already resolved and carried it out.
+            GameCommand.ToggleDrag -> post("Drag / drop", OverlayEvent.Kind.ACTION)
             // These change settings a live session owns, so the preview deliberately leaves them.
             GameCommand.CursorMode -> post("Cursor mode (in the real game only)", OverlayEvent.Kind.ACTION)
             GameCommand.JoystickMode -> post("Joystick mode (in the real game only)", OverlayEvent.Kind.ACTION)

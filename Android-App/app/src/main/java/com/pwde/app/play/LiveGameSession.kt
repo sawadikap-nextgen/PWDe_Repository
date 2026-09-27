@@ -154,8 +154,14 @@ class LiveGameSession(
     }
 
     private fun onGesture(gesture: FacialGesture) {
-        val command = GameInput.fromGesture(gesture, livePlay.state.value.buttons, config)
-        GameInput.navigationRefusal(command, livePlay.state.value.navigationMode())?.let { return message(it) }
+        val state = livePlay.state.value
+        val command = GameInput.resolveDrag(GameInput.fromGesture(gesture, state.buttons, config), state.dragging)
+        GameInput.navigationRefusal(command, state.navigationMode())?.let { return message(it) }
+        // A drag holds a finger at the pointer; in joystick mode that finger and the movement stick's
+        // would cancel each other's gestures, and there is no pointer to aim it anyway.
+        if (command == GameCommand.StartDrag && state.face.outputMode == FaceOutputMode.JOYSTICK) {
+            return message("In joystick mode your head steers the movement stick — say \"cursor mode\" to drag")
+        }
         runUnlessPaused(command)
     }
 
@@ -205,12 +211,15 @@ class LiveGameSession(
             GameCommand.StartDrag -> {
                 livePlay.update { it.copy(dragging = true) }
                 livePlay.perform(command)
-                message("Dragging — say \"drop\" to let go")
+                message("Dragging — move your head, then repeat the gesture or say \"drop\" to let go")
             }
             GameCommand.Drop -> {
+                val wasDragging = livePlay.state.value.dragging
                 livePlay.update { it.copy(dragging = false) }
                 livePlay.perform(command)
+                if (wasDragging) message("Dropped")
             }
+            GameCommand.ToggleDrag -> execute(GameInput.resolveDrag(command, livePlay.state.value.dragging))
             GameCommand.Select, GameCommand.TouchHold, GameCommand.Back, GameCommand.Home,
             GameCommand.Notifications, GameCommand.AllApps, GameCommand.Recents, is GameCommand.Scroll -> livePlay.perform(command)
         }
@@ -276,6 +285,8 @@ class LiveGameSession(
 
     private fun switchMode(mode: InputMode, label: String) {
         scope?.launch { settingsRepository.setInputMode(mode) }
+        // A held drag finger would fight the movement stick for the screen.
+        if (mode == InputMode.JOYSTICK && livePlay.state.value.dragging) execute(GameCommand.Drop)
         // The brake belongs to the mode it was set in: a cursor has no stick to hold still.
         livePlay.update { it.copy(centerLocked = false) }
         message(label)

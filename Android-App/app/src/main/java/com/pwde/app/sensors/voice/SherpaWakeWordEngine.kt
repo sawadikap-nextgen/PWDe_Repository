@@ -6,6 +6,9 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AudioEffect
+import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.Process
 import android.os.SystemClock
@@ -184,6 +187,7 @@ class SherpaWakeWordEngine(
         val spotter: KeywordSpotter,
         val phrasesByLabel: Map<String, String>,
         val unsupported: List<String>,
+        val noiseCancellation: Boolean,
     )
 
     /** Heavy, so it never runs on the main thread: ~6 MB of weights and the tokenizer. */
@@ -236,7 +240,7 @@ class SherpaWakeWordEngine(
                     numTrailingBlanks = spotter.trailingBlanks,
                 ),
             )
-        return Prepared(keywordSpotter, keywords.phrasesByLabel, keywords.unsupported)
+        return Prepared(keywordSpotter, keywords.phrasesByLabel, keywords.unsupported, spotter.noiseCancellation)
     }
 
     /**
@@ -279,7 +283,12 @@ class SherpaWakeWordEngine(
         delay(MIC_SETTLE_MS)
         val record =
             AudioRecord(
-                MediaRecorder.AudioSource.MIC,
+                // VOICE_COMMUNICATION turns on the phone's call processing; MIC is close to raw.
+                if (prepared.noiseCancellation) {
+                    MediaRecorder.AudioSource.VOICE_COMMUNICATION
+                } else {
+                    MediaRecorder.AudioSource.MIC
+                },
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
@@ -291,6 +300,7 @@ class SherpaWakeWordEngine(
             record.release()
             throw IllegalStateException("The microphone could not be opened")
         }
+        val effects = if (prepared.noiseCancellation) attachCleanupEffects(record.audioSessionId) else emptyList()
         val stream = prepared.spotter.createStream()
         val pcm = ShortArray(FEED_SAMPLES)
         var smoothedRtf = 0f
@@ -340,10 +350,29 @@ class SherpaWakeWordEngine(
             } catch (ignored: IllegalStateException) {
                 // Never started.
             }
+            effects.forEach { it.release() }
             record.release()
             stream.release()
             _state.update { it.copy(level = 0f, realTimeFactor = 0f) }
         }
+    }
+
+    /**
+     * Noise suppression and echo cancellation on top of VOICE_COMMUNICATION, for phones whose call
+     * processing doesn't already apply them. Each one is optional hardware: a phone without it, or
+     * one that refuses it, just records without it.
+     */
+    private fun attachCleanupEffects(audioSessionId: Int): List<AudioEffect> {
+        val effects = mutableListOf<AudioEffect>()
+        if (NoiseSuppressor.isAvailable()) {
+            runCatching { NoiseSuppressor.create(audioSessionId) }.getOrNull()?.let(effects::add)
+        }
+        if (AcousticEchoCanceler.isAvailable()) {
+            runCatching { AcousticEchoCanceler.create(audioSessionId) }.getOrNull()?.let(effects::add)
+        }
+        effects.forEach { effect -> runCatching { effect.enabled = true } }
+        Log.i(TAG, "Noise cancellation on, effects: ${effects.joinToString { it.javaClass.simpleName }.ifEmpty { "none" }}")
+        return effects
     }
 
     private fun onDetection(phrase: String) {

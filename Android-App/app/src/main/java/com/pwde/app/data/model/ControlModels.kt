@@ -111,6 +111,12 @@ enum class GestureAction(val label: String) {
     LOCK_CENTER("Lock center"),
 
     TOUCH_HOLD("Touch & hold"),
+
+    /**
+     * Press and hold at the pointer; the finger then follows the head until the same gesture lets go.
+     * How a hands-free user scrolls a list or a page at their own pace.
+     */
+    DRAG("Drag & drop"),
     ALL_APPS("All apps"),
     ;
 

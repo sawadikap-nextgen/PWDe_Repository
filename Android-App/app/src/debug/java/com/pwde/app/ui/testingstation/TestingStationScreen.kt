@@ -531,6 +531,12 @@ private fun WakeWordPanel(
             canIncrease = spotterTuning.activePaths < WakeWordSpotterTuning.ACTIVE_PATHS_RANGE.endInclusive,
             definition = ACTIVE_PATHS_DEFINITION,
         )
+        SwitchRow(
+            "Noise cancellation",
+            spotterTuning.noiseCancellation,
+            { viewModel.setSpotterTuning(spotterTuning.copy(noiseCancellation = it)) },
+            description = "The phone's call-audio cleanup: cuts background noise and the game's own sound. Can cost accuracy on some voices.",
+        )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PwdeButton("Apply & restart", viewModel::applyWakeWordTuning, modifier = Modifier.weight(1f))
             PwdeButton(

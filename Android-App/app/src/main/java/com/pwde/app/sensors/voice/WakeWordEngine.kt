@@ -61,6 +61,9 @@ interface WakeWordEngine {
  *   noise alone.
  * @param trailingBlanks non-keyword frames tolerated after a partial match before giving up.
  * @param activePaths keyword hypotheses pursued at once. Raising it costs CPU.
+ * @param noiseCancellation record through the phone's own voice-call processing (echo cancellation,
+ *   noise suppression, gain control) instead of the raw mic. Echo cancellation is what strips the
+ *   game's own sound out of the mic; how well it does that varies by phone.
  */
 data class WakeWordSpotterTuning(
     val score: Float = 6.0f,
@@ -68,6 +71,7 @@ data class WakeWordSpotterTuning(
     val threshold: Float = 0.0f,
     val trailingBlanks: Int = 3,
     val activePaths: Int = 8,
+    val noiseCancellation: Boolean = true,
 ) {
     /** Every field pulled back into the range the native spotter accepts. */
     fun clamped(): WakeWordSpotterTuning =
